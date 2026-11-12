@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax
+        run: python3 -m py_compile gateway/app.py gateway/node_checks.py gateway/xray-gateway
+      - name: Shell syntax
+        run: bash -n install.sh update.sh uninstall.sh host-network.sh docker/entrypoint.sh docker/update-loop.sh
+      - name: Docker Compose validation
+        run: docker compose config --quiet
