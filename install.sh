@@ -185,7 +185,7 @@ if ! docker compose ps --status running --services | grep -qx 'xray-gateway'; th
   die "Контейнер xray-gateway не перешёл в состояние running"
 fi
 
-SERVER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+SERVER_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')
 SERVER_IP="${SERVER_IP:-SERVER-IP}"
 
 # Читаем сохранённые реквизиты, в том числе при повторном запуске установщика.
