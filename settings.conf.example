@@ -1,0 +1,6 @@
+# Copy to ./data/settings.conf; keep this file private.
+SUBSCRIPTION_URL=https://YOUR-REMNAWAVE-SUBSCRIPTION-URL
+USER_AGENT=Happ
+ACTIVE_PROFILE=0
+TPROXY_PORT=12345
+GATEWAY_IP=0.0.0.0
