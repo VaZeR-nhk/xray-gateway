@@ -63,6 +63,20 @@ assert data["profiles"][0]["name"] == "CI smoke profile", data
 assert data["active_profile"] == 0, data
 PY
 
+services_ready=0
+for _ in $(seq 1 20); do
+  XSTATUS=$(docker exec "$NAME" supervisorctl status xray 2>/dev/null || true)
+  WSTATUS=$(docker exec "$NAME" supervisorctl status web 2>/dev/null || true)
+  if [[ "$XSTATUS" == *RUNNING* && "$WSTATUS" == *RUNNING* ]]; then services_ready=1; break; fi
+  sleep 1
+done
+if [[ "$services_ready" != 1 ]]; then
+  docker exec "$NAME" supervisorctl status || true
+  docker logs "$NAME" || true
+  echo "Supervisor services did not become RUNNING" >&2
+  exit 1
+fi
+
 STATUS=$(curl -fsS --max-time 5 -u ci:ci-password-long http://127.0.0.1:18080/api/status)
 python3 - "$STATUS" <<'PY'
 import json,sys
