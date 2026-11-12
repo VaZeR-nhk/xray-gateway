@@ -29,6 +29,18 @@ bash install.sh
 
 The installer asks for the Remnawave HTTPS subscription URL and Web UI credentials. Secrets, HAPP HWID, downloaded subscription and active profile state are stored under `./data`, not in Git.
 
+### Migration from the existing native installation
+
+On the server that currently runs the native gateway, clone the repository into a clean directory. Do not run `install.sh` first. Then execute:
+
+```bash
+bash migrate-native.sh
+```
+
+The migration requires the existing units `xray-gateway.service` and `xray-gateway-web.service`. It makes a root-only backup, copies the complete `/etc/xray-gateway` data directory (including the existing HWID, subscription, active state and last-good config), builds the Docker image before stopping native services, then starts and checks Xray and Web UI in Docker. If startup or validation fails, it stops the Docker stack and attempts to restore the previously active native services. On success, native units are disabled but their files are retained. The host firewall is not changed by migration.
+
+Do not use this migration script on a host with a different native unit layout without adapting and reviewing it first.
+
 After confirming that the container and Xray are running, install host TPROXY rules:
 
 ```bash
