@@ -72,10 +72,17 @@ systemctl is-active --quiet docker || die "Служба Docker не запуст
 docker info >/dev/null 2>&1 || die "Docker Engine не отвечает"
 docker compose version
 
-# Проверяем доступное место до сборки образа.
-AVAIL_KB="$(df -Pk "$SCRIPT_DIR" | awk 'NR==2 {print $4}')"
-[[ "$AVAIL_KB" =~ ^[0-9]+$ ]] || die "Не удалось определить свободное место на диске"
-(( AVAIL_KB >= 2097152 )) || die "Недостаточно места: нужно не менее 2 GiB свободного места для сборки образа"
+# Проверяем место и в каталоге проекта, и в хранилище Docker.
+# Для этого образа достаточно 1 GiB запаса; сборка не компилирует Xray из исходников.
+MIN_FREE_KB=1048576
+DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null)"
+[[ -n "$DOCKER_ROOT" && -d "$DOCKER_ROOT" ]] || die "Не удалось определить каталог данных Docker"
+
+for CHECK_PATH in "$SCRIPT_DIR" "$DOCKER_ROOT"; do
+  AVAIL_KB="$(df -Pk "$CHECK_PATH" | awk 'NR==2 {print $4}')"
+  [[ "$AVAIL_KB" =~ ^[0-9]+$ ]] || die "Не удалось определить свободное место для $CHECK_PATH"
+  (( AVAIL_KB >= MIN_FREE_KB )) || die "Недостаточно места на разделе $CHECK_PATH: нужно не менее 1 GiB свободного места"
+done
 
 mkdir -p data
 chmod 700 data
