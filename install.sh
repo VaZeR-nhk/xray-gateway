@@ -117,7 +117,7 @@ for key, default in (("USER_AGENT","Happ"),("ACTIVE_PROFILE","0"),("TPROXY_PORT"
     if not any(x.startswith(key+"=") for x in out): out.append(key+"="+default)
 fd,tmp=tempfile.mkstemp(dir="data",prefix="settings.")
 with os.fdopen(fd,"w") as f:
-    f.write("\\n".join(out)+"\\n")
+    f.write("\n".join(out)+"\n")
 os.chmod(tmp,0o600)
 os.replace(tmp,p)
 PYSETTINGS
