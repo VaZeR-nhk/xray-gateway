@@ -98,7 +98,313 @@ else
   read -r -p "Remnawave subscription URL (HTTPS, ввод отображается): " SUB_URL
 fi
 [[ "$SUB_URL" == https://* ]] || die "Нужен HTTPS URL подписки"
-[[ "$SUB_URL" != *$'\\n'* && "$SUB_URL" != *$'\\r'* ]] || die "Некорректный URL"
+[[ "$SUB_URL" != ** && "$SUB_URL" != ** ]] || die "Некорректный URL"
+
+export XRAY_GATEWAY_SUBSCRIPTION_URL="$SUB_URL"
+python3 - <<'PYSETTINGS'
+import os, pathlib, tempfile
+p=pathlib.Path("data/settings.conf")
+value=os.environ["XRAY_GATEWAY_SUBSCRIPTION_URL"]
+lines=p.read_text().splitlines() if p.exists() else []
+out=[]; found=False
+for line in lines:
+    if line.startswith("SUBSCRIPTION_URL="):
+        out.append("SUBSCRIPTION_URL="+value); found=True
+    else:
+        out.append(line)
+if not found: out.insert(0,"SUBSCRIPTION_URL="+value)
+for key, default in (("USER_AGENT","Happ"),("ACTIVE_PROFILE","0"),("TPROXY_PORT","12345"),("GATEWAY_IP","0.0.0.0")):
+    if not any(x.startswith(key+"=") for x in out): out.append(key+"="+default)
+fd,tmp=tempfile.mkstemp(dir="data",prefix="settings.")
+with os.fdopen(fd,"w") as f:
+    f.write("\n".join(out)+"\n")
+os.chmod(tmp,0o600)
+os.replace(tmp,p)
+PYSETTINGS
+unset SUB_URL XRAY_GATEWAY_SUBSCRIPTION_URL
+if [[ ! -s data/web-auth ]]; then
+  echo
+  while true; do
+    read -r -p "Web UI username [admin]: " WEB_USER
+    WEB_USER="${WEB_USER:-admin}"
+    if [[ "$WEB_USER" != *:* && -n "$WEB_USER" ]]; then
+      break
+    fi
+    warn "Имя пользователя не должно быть пустым или содержать двоеточие. Повтори ввод."
+  done
+
+  read -r -p "Сгенерировать пароль автоматически? [y/N]: " GENERATE_PASSWORD
+  case "${GENERATE_PASSWORD,,}" in
+    y|yes|д|да)
+      # 24 случайных байта в hex: 48 символов, безопасных для basic-auth.
+      WEB_PASS="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+      [[ "${#WEB_PASS}" -eq 48 ]] || die "Не удалось сгенерировать пароль"
+      log "Сгенерирован случайный пароль длиной 48 символов"
+      ;;
+    *)
+      while true; do
+        # Пароль отображается при вводе — ввод не скрывается.
+        read -r -p "Web UI password (min 12 chars): " WEB_PASS
+        if [[ "${#WEB_PASS}" -lt 12 ]]; then
+          warn "Пароль должен содержать не менее 12 символов. Повтори ввод."
+          continue
+        fi
+
+        read -r -p "Повтори пароль: " WEB_PASS_CONFIRM
+        if [[ "$WEB_PASS" != "$WEB_PASS_CONFIRM" ]]; then
+          warn "Пароли не совпадают. Начни ввод пароля заново."
+          continue
+        fi
+        break
+      done
+      ;;
+  esac
+
+  printf '%s:%s\n' "$WEB_USER" "$WEB_PASS" > data/web-auth
+  chmod 600 data/web-auth
+  unset WEB_PASS_CONFIRM
+else
+  log "Найден data/web-auth — сохраняю существующую авторизацию панели"
+fi
+
+if [[ ! -f .env ]]; then
+  printf 'XRAY_VERSION=26.11.9\n' > .env
+fi
+
+log "Проверяю конфигурацию Docker Compose"
+docker compose config --quiet
+
+log "Собираю образ и запускаю Xray Gateway"
+docker compose up -d --build
+
+log "Проверяю состояние контейнера"
+sleep 3
+docker compose ps
+if ! docker compose ps --status running --services | grep -qx 'xray-gateway'; then
+  docker compose logs --tail=100 xray-gateway || true
+  die "Контейнер xray-gateway не перешёл в состояние running"
+fi
+
+SERVER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+SERVER_IP="${SERVER_IP:-SERVER-IP}"
+
+# Читаем сохранённые реквизиты, в том числе при повторном запуске установщика.
+IFS=: read -r WEB_USER WEB_PASS < data/web-auth
+[[ -n "$WEB_USER" && -n "$WEB_PASS" ]] || die "Не удалось прочитать реквизиты Web UI"
+
+echo
+log "Установка завершена"
+echo "Web UI:  http://$SERVER_IP:8080"
+echo "Логин:   $WEB_USER"
+echo "Пароль:  $WEB_PASS"
+warn "Сохраните пароль в менеджере паролей. Он также хранится в /opt/xray-gateway/data/web-auth с правами 600."
+warn "Прозрачная маршрутизация (TPROXY) пока НЕ включена."
+warn "Не направляй LAN-трафик через сервер, пока отдельно не проверим панель, подписку, профили и host-network.sh."
+\n'* && "$SUB_URL" != *$'\\r'* ]] || die "Некорректный URL"
+
+export XRAY_GATEWAY_SUBSCRIPTION_URL="$SUB_URL"
+python3 - <<'PYSETTINGS'
+import os, pathlib, tempfile
+p=pathlib.Path("data/settings.conf")
+value=os.environ["XRAY_GATEWAY_SUBSCRIPTION_URL"]
+lines=p.read_text().splitlines() if p.exists() else []
+out=[]; found=False
+for line in lines:
+    if line.startswith("SUBSCRIPTION_URL="):
+        out.append("SUBSCRIPTION_URL="+value); found=True
+    else:
+        out.append(line)
+if not found: out.insert(0,"SUBSCRIPTION_URL="+value)
+for key, default in (("USER_AGENT","Happ"),("ACTIVE_PROFILE","0"),("TPROXY_PORT","12345"),("GATEWAY_IP","0.0.0.0")):
+    if not any(x.startswith(key+"=") for x in out): out.append(key+"="+default)
+fd,tmp=tempfile.mkstemp(dir="data",prefix="settings.")
+with os.fdopen(fd,"w") as f:
+    f.write("\n".join(out)+"\n")
+os.chmod(tmp,0o600)
+os.replace(tmp,p)
+PYSETTINGS
+unset SUB_URL XRAY_GATEWAY_SUBSCRIPTION_URL
+if [[ ! -s data/web-auth ]]; then
+  echo
+  while true; do
+    read -r -p "Web UI username [admin]: " WEB_USER
+    WEB_USER="${WEB_USER:-admin}"
+    if [[ "$WEB_USER" != *:* && -n "$WEB_USER" ]]; then
+      break
+    fi
+    warn "Имя пользователя не должно быть пустым или содержать двоеточие. Повтори ввод."
+  done
+
+  read -r -p "Сгенерировать пароль автоматически? [y/N]: " GENERATE_PASSWORD
+  case "${GENERATE_PASSWORD,,}" in
+    y|yes|д|да)
+      # 24 случайных байта в hex: 48 символов, безопасных для basic-auth.
+      WEB_PASS="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+      [[ "${#WEB_PASS}" -eq 48 ]] || die "Не удалось сгенерировать пароль"
+      log "Сгенерирован случайный пароль длиной 48 символов"
+      ;;
+    *)
+      while true; do
+        # Пароль отображается при вводе — ввод не скрывается.
+        read -r -p "Web UI password (min 12 chars): " WEB_PASS
+        if [[ "${#WEB_PASS}" -lt 12 ]]; then
+          warn "Пароль должен содержать не менее 12 символов. Повтори ввод."
+          continue
+        fi
+
+        read -r -p "Повтори пароль: " WEB_PASS_CONFIRM
+        if [[ "$WEB_PASS" != "$WEB_PASS_CONFIRM" ]]; then
+          warn "Пароли не совпадают. Начни ввод пароля заново."
+          continue
+        fi
+        break
+      done
+      ;;
+  esac
+
+  printf '%s:%s\n' "$WEB_USER" "$WEB_PASS" > data/web-auth
+  chmod 600 data/web-auth
+  unset WEB_PASS_CONFIRM
+else
+  log "Найден data/web-auth — сохраняю существующую авторизацию панели"
+fi
+
+if [[ ! -f .env ]]; then
+  printf 'XRAY_VERSION=26.11.9\n' > .env
+fi
+
+log "Проверяю конфигурацию Docker Compose"
+docker compose config --quiet
+
+log "Собираю образ и запускаю Xray Gateway"
+docker compose up -d --build
+
+log "Проверяю состояние контейнера"
+sleep 3
+docker compose ps
+if ! docker compose ps --status running --services | grep -qx 'xray-gateway'; then
+  docker compose logs --tail=100 xray-gateway || true
+  die "Контейнер xray-gateway не перешёл в состояние running"
+fi
+
+SERVER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+SERVER_IP="${SERVER_IP:-SERVER-IP}"
+
+# Читаем сохранённые реквизиты, в том числе при повторном запуске установщика.
+IFS=: read -r WEB_USER WEB_PASS < data/web-auth
+[[ -n "$WEB_USER" && -n "$WEB_PASS" ]] || die "Не удалось прочитать реквизиты Web UI"
+
+echo
+log "Установка завершена"
+echo "Web UI:  http://$SERVER_IP:8080"
+echo "Логин:   $WEB_USER"
+echo "Пароль:  $WEB_PASS"
+warn "Сохраните пароль в менеджере паролей. Он также хранится в /opt/xray-gateway/data/web-auth с правами 600."
+warn "Прозрачная маршрутизация (TPROXY) пока НЕ включена."
+warn "Не направляй LAN-трафик через сервер, пока отдельно не проверим панель, подписку, профили и host-network.sh."
+\r'* ]] || die "Некорректный URL"
+
+export XRAY_GATEWAY_SUBSCRIPTION_URL="$SUB_URL"
+python3 - <<'PYSETTINGS'
+import os, pathlib, tempfile
+p=pathlib.Path("data/settings.conf")
+value=os.environ["XRAY_GATEWAY_SUBSCRIPTION_URL"]
+lines=p.read_text().splitlines() if p.exists() else []
+out=[]; found=False
+for line in lines:
+    if line.startswith("SUBSCRIPTION_URL="):
+        out.append("SUBSCRIPTION_URL="+value); found=True
+    else:
+        out.append(line)
+if not found: out.insert(0,"SUBSCRIPTION_URL="+value)
+for key, default in (("USER_AGENT","Happ"),("ACTIVE_PROFILE","0"),("TPROXY_PORT","12345"),("GATEWAY_IP","0.0.0.0")):
+    if not any(x.startswith(key+"=") for x in out): out.append(key+"="+default)
+fd,tmp=tempfile.mkstemp(dir="data",prefix="settings.")
+with os.fdopen(fd,"w") as f:
+    f.write("\n".join(out)+"\n")
+os.chmod(tmp,0o600)
+os.replace(tmp,p)
+PYSETTINGS
+unset SUB_URL XRAY_GATEWAY_SUBSCRIPTION_URL
+if [[ ! -s data/web-auth ]]; then
+  echo
+  while true; do
+    read -r -p "Web UI username [admin]: " WEB_USER
+    WEB_USER="${WEB_USER:-admin}"
+    if [[ "$WEB_USER" != *:* && -n "$WEB_USER" ]]; then
+      break
+    fi
+    warn "Имя пользователя не должно быть пустым или содержать двоеточие. Повтори ввод."
+  done
+
+  read -r -p "Сгенерировать пароль автоматически? [y/N]: " GENERATE_PASSWORD
+  case "${GENERATE_PASSWORD,,}" in
+    y|yes|д|да)
+      # 24 случайных байта в hex: 48 символов, безопасных для basic-auth.
+      WEB_PASS="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+      [[ "${#WEB_PASS}" -eq 48 ]] || die "Не удалось сгенерировать пароль"
+      log "Сгенерирован случайный пароль длиной 48 символов"
+      ;;
+    *)
+      while true; do
+        # Пароль отображается при вводе — ввод не скрывается.
+        read -r -p "Web UI password (min 12 chars): " WEB_PASS
+        if [[ "${#WEB_PASS}" -lt 12 ]]; then
+          warn "Пароль должен содержать не менее 12 символов. Повтори ввод."
+          continue
+        fi
+
+        read -r -p "Повтори пароль: " WEB_PASS_CONFIRM
+        if [[ "$WEB_PASS" != "$WEB_PASS_CONFIRM" ]]; then
+          warn "Пароли не совпадают. Начни ввод пароля заново."
+          continue
+        fi
+        break
+      done
+      ;;
+  esac
+
+  printf '%s:%s\n' "$WEB_USER" "$WEB_PASS" > data/web-auth
+  chmod 600 data/web-auth
+  unset WEB_PASS_CONFIRM
+else
+  log "Найден data/web-auth — сохраняю существующую авторизацию панели"
+fi
+
+if [[ ! -f .env ]]; then
+  printf 'XRAY_VERSION=26.11.9\n' > .env
+fi
+
+log "Проверяю конфигурацию Docker Compose"
+docker compose config --quiet
+
+log "Собираю образ и запускаю Xray Gateway"
+docker compose up -d --build
+
+log "Проверяю состояние контейнера"
+sleep 3
+docker compose ps
+if ! docker compose ps --status running --services | grep -qx 'xray-gateway'; then
+  docker compose logs --tail=100 xray-gateway || true
+  die "Контейнер xray-gateway не перешёл в состояние running"
+fi
+
+SERVER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+SERVER_IP="${SERVER_IP:-SERVER-IP}"
+
+# Читаем сохранённые реквизиты, в том числе при повторном запуске установщика.
+IFS=: read -r WEB_USER WEB_PASS < data/web-auth
+[[ -n "$WEB_USER" && -n "$WEB_PASS" ]] || die "Не удалось прочитать реквизиты Web UI"
+
+echo
+log "Установка завершена"
+echo "Web UI:  http://$SERVER_IP:8080"
+echo "Логин:   $WEB_USER"
+echo "Пароль:  $WEB_PASS"
+warn "Сохраните пароль в менеджере паролей. Он также хранится в /opt/xray-gateway/data/web-auth с правами 600."
+warn "Прозрачная маршрутизация (TPROXY) пока НЕ включена."
+warn "Не направляй LAN-трафик через сервер, пока отдельно не проверим панель, подписку, профили и host-network.sh."
+\n'* && "$SUB_URL" != *$'\\r'* ]] || die "Некорректный URL"
 
 export XRAY_GATEWAY_SUBSCRIPTION_URL="$SUB_URL"
 python3 - <<'PYSETTINGS'
