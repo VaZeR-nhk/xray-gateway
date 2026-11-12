@@ -6,6 +6,7 @@ services:
         XRAY_VERSION: ${XRAY_VERSION:-26.11.9}
     image: vazer/xray-gateway:${XRAY_VERSION:-26.11.9}
     container_name: xray-gateway
+    hostname: ${HOSTNAME:-xray-gateway}
     network_mode: host
     restart: unless-stopped
     init: true
