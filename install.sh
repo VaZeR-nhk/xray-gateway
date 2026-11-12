@@ -102,16 +102,31 @@ fi
 
 if [[ ! -s data/web-auth ]]; then
   echo
-  read -r -p "Web UI username [admin]: " WEB_USER
-  WEB_USER="${WEB_USER:-admin}"
-  [[ "$WEB_USER" != *:* && -n "$WEB_USER" ]] || die "Имя пользователя не должно быть пустым или содержать двоеточие"
+  while true; do
+    read -r -p "Web UI username [admin]: " WEB_USER
+    WEB_USER="${WEB_USER:-admin}"
+    if [[ "$WEB_USER" != *:* && -n "$WEB_USER" ]]; then
+      break
+    fi
+    warn "Имя пользователя не должно быть пустым или содержать двоеточие. Повтори ввод."
+  done
 
-  read -r -s -p "Web UI password (min 12 chars): " WEB_PASS
-  echo
-  read -r -s -p "Повтори пароль: " WEB_PASS_CONFIRM
-  echo
-  [[ "${#WEB_PASS}" -ge 12 ]] || die "Пароль должен содержать не менее 12 символов"
-  [[ "$WEB_PASS" == "$WEB_PASS_CONFIRM" ]] || die "Пароли не совпадают"
+  while true; do
+    # Пароль отображается при вводе — ввод не скрывается.
+    read -r -p "Web UI password (min 12 chars): " WEB_PASS
+    if [[ "${#WEB_PASS}" -lt 12 ]]; then
+      warn "Пароль должен содержать не менее 12 символов. Повтори ввод."
+      continue
+    fi
+
+    read -r -p "Повтори пароль: " WEB_PASS_CONFIRM
+    if [[ "$WEB_PASS" != "$WEB_PASS_CONFIRM" ]]; then
+      warn "Пароли не совпадают. Начни ввод пароля заново."
+      continue
+    fi
+    break
+  done
+
   printf '%s:%s\n' "$WEB_USER" "$WEB_PASS" > data/web-auth
   chmod 600 data/web-auth
   unset WEB_PASS WEB_PASS_CONFIRM
