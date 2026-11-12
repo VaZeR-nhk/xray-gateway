@@ -89,12 +89,12 @@ def set_subscription_url(value):
             out.append("SUBSCRIPTION_URL="+value); replaced=True
         else: out.append(line)
     if not replaced: out.append("SUBSCRIPTION_URL="+value)
-    atomic(envfile,("\n".join(out)+"\n").encode())
+    envfile.write_text("\n".join(out)+"\n"); os.chmod(envfile,0o600)
     try:
         result=update()
         return result
     except Exception:
-        atomic(envfile,old)
+        envfile.write_bytes(old); os.chmod(envfile,0o600)
         raise
 def active_index(cfg):
     if STATE.exists(): return int(json.loads(STATE.read_text()).get("active_profile",cfg.get("ACTIVE_PROFILE",0)))
