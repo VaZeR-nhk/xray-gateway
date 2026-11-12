@@ -40,6 +40,9 @@ docker run -d --name "$NAME" --network host \
   -e XRAY_WEB_HOST=127.0.0.1 -e XRAY_WEB_PORT=18080 \
   -v "$DATA:/etc/xray-gateway" "$IMAGE" >/dev/null
 
+docker exec "$NAME" test -s /usr/local/bin/geosite.dat
+docker exec "$NAME" test -s /usr/local/bin/geoip.dat
+
 ready=0
 for _ in $(seq 1 30); do
   if curl -fsS --max-time 2 -u ci:ci-password-long http://127.0.0.1:18080/api/profiles > "$OUT"; then
