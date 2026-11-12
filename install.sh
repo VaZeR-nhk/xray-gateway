@@ -5,6 +5,7 @@ set -Eeuo pipefail
 # Run as root on a clean Debian 12/13 server.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+[[ "$SCRIPT_DIR" == "/opt/xray-gateway" ]] || { echo "[ERROR] Проект должен находиться строго в /opt/xray-gateway (сейчас: $SCRIPT_DIR)" >&2; exit 1; }
 cd "$SCRIPT_DIR"
 
 RED='\033[0;31m'
