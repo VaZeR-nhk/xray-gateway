@@ -1,108 +1,205 @@
 # Xray Gateway
 
-Docker-based Xray transparent gateway with an integrated Web UI.
+Самостоятельный прозрачный шлюз на базе **Xray Core**, Docker Compose и встроенной веб-панели.
 
-> **ALPHA / NOT PRODUCTION READY.** The Docker image and host TPROXY rules have not yet completed end-to-end validation against a real LAN and Remnawave subscription. Test on an isolated host before routing production traffic.
+> **Статус: ALPHA.** Проект ещё требует полноценной проверки на реальном сервере и тестовой LAN-сети. Не направляйте через него всю рабочую сеть до прохождения контрольного списка ниже.
 
-## Architecture
+## 1. Размещение файлов
 
-One container runs Xray Core, the Python gateway, Web UI, isolated node checker and hourly subscription updater. Docker uses `network_mode: host`. Persistent state is mounted from `./data` to `/etc/xray-gateway`.
+Проект устанавливается строго в:
 
-The host-side network helper creates a dedicated nftables table (`inet xray_gateway`), one IPv4 policy-routing rule and a local route in table 100. It does not flush or rewrite the host's existing firewall. It intercepts TCP and UDP arriving on the selected LAN interface, excluding RFC1918, link-local, multicast, loopback, reserved and the configured LAN subnet. IPv6 interception is not implemented.
+```text
+/opt/xray-gateway/
+├── data/                  # настройки, HWID, подписка, активный профиль, конфиги
+├── gateway/               # Gateway API и проверка узлов
+├── docker/                # entrypoint, supervisord, scheduler
+├── install.sh             # установка зависимостей и запуск
+├── update.sh              # обновление проекта
+├── uninstall.sh           # остановка контейнера
+├── host-network.sh        # настройка host TPROXY
+└── docker-compose.yml
+```
 
-## Requirements
+Все данные проекта и секреты находятся в `/opt/xray-gateway`, прежде всего в `/opt/xray-gateway/data`. Каталог данных не хранится в Git и сохраняется при обновлении и удалении контейнера.
 
-- Debian 12/13, IPv4 LAN.
-- Docker Engine and Docker Compose v2.
-- Root access.
-- A dedicated LAN ingress interface (often a Linux bridge such as `br0`).
+Docker Engine устанавливается штатно. Его системные данные (образы, слои и контейнерное хранилище) по умолчанию находятся в `/var/lib/docker` — это стандартный каталог Docker, не каталог данных Xray Gateway.
 
-## Install
+## 2. Требования
 
-First install and start the container:
+- Debian 12 (Bookworm) или Debian 13 (Trixie).
+- Архитектура amd64 или arm64.
+- Права root.
+- Доступ к APT-репозиториям Debian и официальному репозиторию Docker.
+- HTTPS URL подписки Remnawave.
+- Не менее 2 GiB свободного места для сборки образа (рекомендуется больше).
+
+**Не нужно заранее устанавливать Docker или curl.** Установщик сам поставит необходимые пакеты.
+
+## 3. Установка с нуля
+
+Выполнять на новом сервере под root:
 
 ```bash
-git clone https://github.com/VaZeR-nhk/xray-gateway.git
-cd xray-gateway
+apt-get update
+apt-get install -y git
+mkdir -p /opt
+git clone https://github.com/VaZeR-nhk/xray-gateway.git /opt/xray-gateway
+cd /opt/xray-gateway
 bash install.sh
 ```
 
-The installer asks for the Remnawave HTTPS subscription URL and Web UI credentials. Secrets, HAPP HWID, downloaded subscription and active profile state are stored under `./data`, not in Git.
+Установщик выполняет следующие действия:
 
-### Migration from the existing native installation
+1. Проверяет root, версию Debian, архитектуру, systemd и свободное место.
+2. Обновляет индекс APT.
+3. Устанавливает `ca-certificates`, `curl`, `gnupg`, `git`, `jq`, `iproute2`, `nftables`.
+4. Подключает официальный APT-репозиторий Docker.
+5. Устанавливает Docker Engine, Buildx и Docker Compose v2.
+6. Включает и запускает службу Docker.
+7. Запрашивает HTTPS URL подписки Remnawave, если настройки ещё не созданы.
+8. Запрашивает логин и пароль веб-панели, если файл авторизации ещё не создан.
+9. Собирает Docker-образ и запускает контейнер.
+10. Проверяет, что контейнер перешёл в состояние running.
 
-On the server that currently runs the native gateway, clone the repository into a clean directory. Do not run `install.sh` first. Then execute:
+Пароль панели вводится скрыто и запрашивается дважды. URL подписки также вводится без отображения на экране.
 
-```bash
-bash migrate-native.sh
+После установки панель будет доступна по адресу:
+
+```text
+http://IP_СЕРВЕРА:8080
 ```
 
-The migration requires the existing units `xray-gateway.service` and `xray-gateway-web.service`. It makes a root-only backup, copies the complete `/etc/xray-gateway` data directory (including the existing HWID, subscription, active state and last-good config), builds the Docker image before stopping native services, then starts and checks Xray and Web UI in Docker. If startup or validation fails, it stops the Docker stack and attempts to restore the previously active native services. On success, native units are disabled but their files are retained. The host firewall is not changed by migration.
+Не публикуйте порт 8080 напрямую в Интернет. Для удалённого доступа используйте доверенную сеть или reverse proxy с TLS и ограничением доступа.
 
-Do not use this migration script on a host with a different native unit layout without adapting and reviewing it first.
+## 4. Что работает внутри контейнера
 
-After confirming that the container and Xray are running, install host TPROXY rules:
+В одном контейнере под Supervisor запускаются:
+
+- Xray Core;
+- Python Gateway;
+- Web UI;
+- изолированный тестировщик узлов;
+- планировщик обновления подписки.
+
+Используется `network_mode: host`, поскольку шлюзу требуется TPROXY. Порт 8080 слушается на хосте. Для работы контейнера выданы необходимые сетевые capabilities.
+
+## 5. Подписка и профили
+
+- Подписка загружается с HAPP-заголовками и постоянным HWID.
+- HWID хранится в `/opt/xray-gateway/data/hwid`.
+- Исходный список профилей и узлов сохраняется без фильтрации и удаления узлов.
+- Автоматическое переключение профиля не выполняется.
+- Активный профиль меняется только вручную через панель/API.
+- Перед применением конфигурация проверяется командой Xray `run -test`.
+- При неудачном применении предусмотрен откат к предыдущей конфигурации.
+- Подписка обновляется автоматически раз в час.
+
+Не удаляйте и не редактируйте вручную файлы в `data`, если не понимаете их назначение. Перед ручными изменениями сделайте резервную копию каталога.
+
+## 6. Проверка узлов
+
+Проверка узлов запускает отдельные временные процессы Xray и отдельные локальные SOCKS-порты. Она не должна:
+
+- перезапускать основной Xray;
+- менять активный профиль;
+- изменять или фильтровать JSON подписки;
+- исключать узлы из списка.
+
+Проверка использует HTTP endpoint `www.gstatic.com/generate_204`. Если конкретный endpoint недоступен через узел, это ещё не доказывает, что узел полностью неработоспособен.
+
+## 7. Прозрачная маршрутизация (TPROXY)
+
+**TPROXY не включается установщиком автоматически.** Сначала проверьте загрузку подписки, список профилей, ручное переключение и работу панели.
+
+После проверки контейнера настройте маршрутизацию отдельно:
 
 ```bash
+cd /opt/xray-gateway
 bash host-network.sh install
 ```
 
-The helper asks for the LAN ingress interface and LAN CIDR (for example `br0` and `192.168.12.0/24`). You can also pass them as arguments:
+Скрипт запросит LAN-интерфейс и IPv4-подсеть, например:
+
+```text
+Интерфейс: br0
+Подсеть:   192.168.12.0/24
+```
+
+Их можно передать аргументами:
 
 ```bash
 bash host-network.sh install br0 192.168.12.0/24
 ```
 
-It installs a dedicated systemd oneshot unit for persistence across reboot. The helper stores the previous `rp_filter` values and restores them on removal. Review the interface carefully: traffic is intercepted only when it enters through that interface.
+Скрипт создаёт отдельную nftables-таблицу `inet xray_gateway`, policy rule и local route. Он не должен очищать или переписывать посторонние таблицы firewall. Для сохранения настроек после перезагрузки создаётся отдельная systemd-служба.
 
-Open `http://SERVER-IP:8080` from a trusted management network. The built-in Web UI uses HTTP Basic Authentication; do not expose port 8080 directly to the public Internet. Put it behind a trusted reverse proxy with TLS if remote access is required.
+Текущая реализация перехватывает только IPv4. IPv6 через этот шлюз не маршрутизируется. До включения на всей сети сначала проверьте работу на одном тестовом клиенте.
 
-## Operations
-
-```bash
-bash update.sh
-docker compose logs -f
-docker compose ps
-```
-
-Remove only the host TPROXY integration:
+Откат TPROXY:
 
 ```bash
+cd /opt/xray-gateway
 bash host-network.sh uninstall
 ```
 
-Remove the container while preserving `./data`:
+## 8. Обновление
 
 ```bash
+cd /opt/xray-gateway
+bash update.sh
+```
+
+Команда обновляет Git-репозиторий и пересобирает/перезапускает контейнер. Каталог `data` сохраняется.
+
+Посмотреть состояние и логи:
+
+```bash
+cd /opt/xray-gateway
+docker compose ps
+docker compose logs --tail=100
+docker compose logs -f
+```
+
+Проверить процессы внутри контейнера:
+
+```bash
+docker compose exec xray-gateway supervisorctl status
+```
+
+## 9. Остановка и удаление
+
+Остановить и удалить контейнер, сохранив настройки и подписку:
+
+```bash
+cd /opt/xray-gateway
 bash uninstall.sh
 ```
 
-## Current behavior
+Скрипт выполняет `docker compose down`. Каталог `/opt/xray-gateway/data` не удаляется.
 
-- Subscription is downloaded with a persistent HAPP HWID.
-- Original profile list is retained; no actual node is removed or filtered from the subscription.
-- Profile selection is manual. The API verifies the selected index after applying it.
-- Xray config is validated before it is applied; failed restarts trigger rollback where a previous config exists.
-- Node checks run separate temporary Xray processes through local SOCKS listeners. They do not restart or alter the main Xray process, active profile or subscription JSON.
-- The Web UI and Xray run in the same container under Supervisor.
-- Subscription update runs hourly.
+Удаление TPROXY выполняется отдельно командой из раздела 7. Удаление Docker Engine и его системного хранилища в процедуру удаления проекта не входит.
 
-## Important limitations
+## 10. Перенос с native-установки
 
-- TPROXY setup currently handles IPv4 only. IPv6 traffic is not intercepted and must be handled separately or disabled/routed outside this gateway.
-- The node check uses `http://www.gstatic.com/generate_204`; a node can be usable while this particular test endpoint is blocked.
-- No automatic failover or profile switching is performed.
-- No production end-to-end validation has yet been completed. Do not direct an entire production LAN through this build until the checklist below passes.
+Для переноса существующего сервера используйте отдельный сценарий `migrate-native.sh`, а не обычный `install.sh`.
 
-## Pre-production checklist
+Перед запуском необходимо проверить содержимое скрипта и соответствие native-служб:
 
-1. Back up the existing native gateway, including its original HWID, settings, subscription, active profile, config and Web UI credentials.
-2. Build the image and verify container health and Xray status.
-3. Confirm that the panel lists all subscription profiles and that manual profile selection changes the active configuration.
-4. Run all node checks and compare their results with independent connectivity tests.
-5. Apply host TPROXY on a test LAN client first.
-6. Verify LAN-to-LAN, router management, DNS, IPv4, UDP and direct/private destinations.
-7. Reboot and confirm the systemd TPROXY unit restores the rules.
-8. Run the uninstall command and confirm that only project-owned rules are removed.
+- `xray-gateway.service`;
+- `xray-gateway-web.service`.
 
-Do not migrate or stop an existing native production gateway using this repository yet. A dedicated data/HWID migration and rollback procedure still needs to be completed and tested.
+Сценарий переносит данные из `/etc/xray-gateway`, включая HWID, подписку и текущую конфигурацию. Не запускайте его на новом чистом сервере. Сначала сделайте независимую резервную копию и убедитесь, что сценарий соответствует фактической конфигурации старого сервера.
+
+## 11. Контрольный список перед вводом в эксплуатацию
+
+1. Убедиться, что контейнер запущен и процессы Xray/Web UI имеют статус RUNNING.
+2. Убедиться, что подписка загрузилась и все профили отображаются.
+3. Проверить ручное переключение профиля и подтверждение активного индекса.
+4. Запустить проверку узлов и убедиться, что она не влияет на основной Xray.
+5. Проверить доступ к панели только из доверенной сети.
+6. Включить TPROXY сначала для одного тестового клиента.
+7. Проверить DNS, TCP, UDP, локальные подсети, доступ к маршрутизатору и исключения.
+8. Перезагрузить сервер и проверить восстановление контейнера и TPROXY.
+9. Проверить сценарий отката.
+
+До завершения этих проверок проект следует считать тестовой сборкой, а не готовым production-шлюзом.
