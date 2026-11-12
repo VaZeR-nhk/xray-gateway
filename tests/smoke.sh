@@ -12,14 +12,16 @@ cleanup(){
 trap cleanup EXIT
 
 chmod 700 "$DATA"
-cat > "$DATA/settings.conf" <<'EOF'
+cat > "$DATA/.env" <<'EOF'
 SUBSCRIPTION_URL=https://example.invalid/subscription
 USER_AGENT=Happ
 ACTIVE_PROFILE=0
 TPROXY_PORT=12345
 GATEWAY_IP=0.0.0.0
+WEB_USERNAME=ci
+WEB_PASSWORD=ci-password-long
+SESSION_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
-printf 'ci:ci-password-long\n' > "$DATA/web-auth"
 printf '11111111-1111-4111-8111-111111111111\n' > "$DATA/hwid"
 cat > "$DATA/subscription.json" <<'EOF'
 [{"remarks":"CI smoke profile","inbounds":[],"outbounds":[{"protocol":"freedom","tag":"direct"}],"routing":{"rules":[]}}]
@@ -39,6 +41,8 @@ chmod 600 "$DATA"/*
 docker run -d --name "$NAME" --network host \
   --cap-add NET_ADMIN --cap-add NET_RAW --cap-add NET_BIND_SERVICE \
   -e XRAY_WEB_HOST=127.0.0.1 -e XRAY_WEB_PORT=18080 \
+  -e WEB_USERNAME=ci -e WEB_PASSWORD=ci-password-long \
+  -e SESSION_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
   -v "$DATA:/etc/xray-gateway" "$IMAGE" >/dev/null
 
 docker exec "$NAME" test -s /usr/local/bin/geosite.dat
@@ -90,7 +94,7 @@ PY
 
 curl -fsS --max-time 3 http://127.0.0.1:18080/ | grep -q "Xray Gateway"
 curl -fsS --max-time 3 http://127.0.0.1:18080/app.js | grep -q "function boot"
-docker exec "$NAME" test -s /etc/xray-gateway/session-secret
+docker exec "$NAME" test -s /etc/xray-gateway/.env
 docker exec "$NAME" supervisorctl status xray | grep -q RUNNING
 docker exec "$NAME" supervisorctl status web | grep -q RUNNING
 echo "Container smoke test passed."
