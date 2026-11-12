@@ -17,6 +17,9 @@ section{background:#1b2736;padding:18px;border-radius:12px;margin:14px 0}.profil
 <h1>Xray Gateway</h1>
 <section><b>Состояние:</b> <span id=status>Загрузка</span><p class=muted id=updated></p>
 <button onclick=updateSub()>Обновить подписку</button></section>
+<section><h2>Подписка Remnawave</h2><p class=muted>Можно заменить URL подписки. Новый адрес сохраняется только после успешной загрузки и проверки профиля.</p>
+<input id=subscriptionUrl type=url placeholder='https://example.com/short-id' style='box-sizing:border-box;width:100%;padding:11px;border-radius:7px;border:1px solid #354357;background:#101722;color:#e7edf5'>
+<button onclick=changeSubscription()>Сохранить и загрузить</button></section>
 <section><h2>Профили</h2><div id=profiles></div></section>
 <section><h2>Проверка узлов подписки</h2><p class=muted>Каждый узел проверяется отдельным временным процессом Xray через локальный SOCKS. Основной Xray, активный профиль и исходная подписка не изменяются.</p>
 <button id=checkButton onclick=startChecks()>Проверить все узлы</button><span class=progress id=checkProgress></span>
@@ -29,6 +32,7 @@ async function refresh(){try{let [p,s]=await Promise.all([api('/api/profiles'),a
 async function action(path,body){try{el('msg').textContent='Выполняется…';let r=await api(path,'POST',body);el('msg').textContent=r.output||'Готово';await refresh()}catch(e){el('msg').textContent=e.message}}
 async function selectProfile(index){if(confirm('Применить выбранный профиль?'))await action('/api/select',{index})}
 async function updateSub(){if(confirm('Загрузить подписку Remnawave?'))await action('/api/update',{})}
+async function changeSubscription(){let url=el('subscriptionUrl').value.trim();if(!url)return alert('Укажите HTTPS URL подписки');if(!url.startsWith('https://'))return alert('Разрешён только HTTPS');if(confirm('Заменить URL подписки и загрузить профили?')){await action('/api/subscription',{url});el('subscriptionUrl').value=''}}
 async function startChecks(){try{let r=await api('/api/checks','POST',{});renderChecks(r)}catch(e){el('checkProgress').textContent=e.message}}
 function renderChecks(s){el('checkProgress').textContent=s.running?'Проверено '+s.completed+' из '+s.total+'…':(s.error?'Ошибка: '+s.error:(s.finished_at?'Завершено '+s.completed+' из '+s.total:''));el('checkButton').disabled=s.running;let body=el('checkRows');body.replaceChildren();for(const x of s.results||[]){let tr=document.createElement('tr');let vals=[x.profile,x.tag,x.protocol,x.address+':'+x.port,x.status,x.latency_ms==null?'—':x.latency_ms+' ms',x.http_code||'—',x.error||''];vals.forEach((v,i)=>{let td=document.createElement('td');td.textContent=v;if(i===4)td.className=x.status==='OK'?'ok':'fail';tr.append(td)});body.append(tr)}}
 async function pollChecks(){try{renderChecks(await api('/api/checks'))}catch(e){el('checkProgress').textContent=e.message}}
@@ -91,6 +95,11 @@ class H(BaseHTTPRequestHandler):
                 if not isinstance(i, int) or isinstance(i, bool) or i < 0: raise ValueError('Некорректный индекс')
                 args = [GATEWAY, 'select', str(i)]
             elif self.path == '/api/update': args = [GATEWAY, 'update']; i = None
+            elif self.path == '/api/subscription':
+                url=body.get('url')
+                if not isinstance(url,str) or not url.startswith('https://') or len(url)>2048:
+                    raise ValueError('Укажите корректный HTTPS URL подписки')
+                args=[GATEWAY,'set-url',url]; i=None
             elif self.path == '/api/checks':
                 self.reply(202, start_checks()); return
             else: self.reply(404, {'error': 'Not found'}); return
