@@ -131,9 +131,7 @@ remove_installation(){
   systemctl disable "$NAME-host-network.service" >/dev/null 2>&1 || true
   rm -f "$UNIT" "$CONFIG" "$STATE"
   systemctl daemon-reload
-  if [[ "$0" == "$INSTALL_PATH" ]]; then
-    rm -f "$INSTALL_PATH"
-  fi
+  rm -f "$INSTALL_PATH"
   log "Автозапуск TPROXY удалён."
 }
 
