@@ -1,0 +1,118 @@
+#!/usr/bin/python3
+import os,sys,json,uuid,fcntl,tempfile,subprocess,urllib.request,datetime,time
+from pathlib import Path
+BASE=Path("/etc/xray-gateway")
+SETTINGS=BASE/"settings.conf"; SUB=BASE/"subscription.json"; CONFIG=BASE/"config.json"
+STATE=BASE/"state.json"; LAST=BASE/"config.last-good.json"; LOCK=BASE/"gateway.lock"
+def log(s): print("[xray-gateway] "+str(s),flush=True)
+def atomic(path,data):
+    fd,tmp=tempfile.mkstemp(dir=BASE,prefix=path.name+".")
+    try:
+        with os.fdopen(fd,"wb") as f: f.write(data); f.flush(); os.fsync(f.fileno())
+        os.chmod(tmp,0o600); os.replace(tmp,path)
+    except: 
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
+def settings():
+    d={}
+    for line in SETTINGS.read_text().splitlines():
+        line=line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k,v=line.split("=",1); d[k.strip()]=v.strip()
+    hp=BASE/"hwid"
+    if not hp.exists(): atomic(hp,(str(uuid.uuid4())+"\n").encode())
+    d["HWID"]=hp.read_text().strip()
+    if not d.get("SUBSCRIPTION_URL","").startswith("https://"): raise ValueError("SUBSCRIPTION_URL должен начинаться с https://")
+    return d
+def run(args,timeout=60): return subprocess.run(args,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=timeout)
+def active(): 
+    r=run(["supervisorctl","status","xray"])
+    return r.returncode==0 and "RUNNING" in r.stdout
+def restart():
+    r=run(["supervisorctl","restart","xray"],30)
+    if r.returncode: raise RuntimeError(r.stdout)
+    time.sleep(2); s=run(["supervisorctl","status","xray"])
+    if s.returncode or "RUNNING" not in s.stdout: raise RuntimeError("Xray не перешёл в RUNNING: "+s.stdout)
+def download(cfg):
+    import platform,socket
+    req=urllib.request.Request(cfg["SUBSCRIPTION_URL"],headers={"User-Agent":cfg.get("USER_AGENT","Happ"),"x-hwid":cfg["HWID"],"x-device-os":"Linux","x-ver-os":platform.freedesktop_os_release().get("VERSION_ID",""),"x-device-model":socket.gethostname(),"Accept":"application/json"})
+    with urllib.request.urlopen(req,timeout=60) as r: raw=r.read()
+    profiles=json.loads(raw)
+    if not isinstance(profiles,list) or not profiles: raise ValueError("Подписка должна быть непустым JSON-массивом")
+    for i,p in enumerate(profiles):
+        if not isinstance(p,dict) or not all(k in p for k in ("inbounds","outbounds","routing")): raise ValueError(f"Некорректная структура профиля {i}")
+    return profiles
+def active_index(cfg):
+    if STATE.exists(): return int(json.loads(STATE.read_text()).get("active_profile",cfg.get("ACTIVE_PROFILE",0)))
+    return int(cfg.get("ACTIVE_PROFILE",0))
+def build(profile,cfg):
+    p=json.loads(json.dumps(profile))
+    p.setdefault("inbounds",[])[:] = [x for x in p.get("inbounds",[]) if x.get("tag")!="tproxy-in"]
+    p["inbounds"].append({"tag":"tproxy-in","listen":cfg.get("GATEWAY_IP","0.0.0.0"),"port":int(cfg.get("TPROXY_PORT","12345")),"protocol":"dokodemo-door","settings":{"network":"tcp,udp","followRedirect":True},"sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True},"streamSettings":{"sockopt":{"tproxy":"tproxy"}}})
+    return (json.dumps(p,ensure_ascii=False,indent=2)+"\n").encode()
+def validate(data):
+    fd,tmp=tempfile.mkstemp(dir=BASE,prefix="check-",suffix=".json")
+    try:
+        with os.fdopen(fd,"wb") as f: f.write(data)
+        r=run(["/usr/local/bin/xray","run","-test","-config",tmp])
+        if r.returncode: raise RuntimeError(r.stdout)
+    finally:
+        try: os.unlink(tmp)
+        except OSError: pass
+def save_state(i,n,action):
+    atomic(STATE,(json.dumps({"active_profile":i,"profile_count":n,"last_update":datetime.datetime.now(datetime.timezone.utc).isoformat(),"status":"success","action":action},ensure_ascii=False,indent=2)+"\n").encode())
+def apply(i,profiles,action):
+    cfg=settings()
+    if i<0 or i>=len(profiles): raise ValueError(f"Индекс {i} вне диапазона 0..{len(profiles)-1}")
+    new=build(profiles[i],cfg); validate(new)
+    old=CONFIG.read_bytes() if CONFIG.exists() else None
+    if old==new: save_state(i,len(profiles),"unchanged"); return "Конфигурация уже активна; перезапуск не нужен"
+    atomic(CONFIG,new)
+    if active():
+        try: restart()
+        except Exception as e:
+            if old is not None:
+                atomic(CONFIG,old)
+                try: restart()
+                except Exception as re: log("КРИТИЧЕСКИЙ ОТКАТ НЕ УДАЛСЯ: "+str(re))
+            raise RuntimeError("Не удалось применить профиль: "+str(e))
+    atomic(LAST,new); save_state(i,len(profiles),action)
+    return f"Профиль {i+1} применён"
+def update():
+    cfg=settings(); profiles=download(cfg); i=active_index(cfg)
+    if i<0 or i>=len(profiles): raise ValueError(f"Активный профиль {i} отсутствует в подписке из {len(profiles)} профилей")
+    new=build(profiles[i],cfg); validate(new)
+    oldsub=SUB.read_bytes() if SUB.exists() else None
+    oldcfg=CONFIG.read_bytes() if CONFIG.exists() else None
+    atomic(SUB,(json.dumps(profiles,ensure_ascii=False,separators=(",",":"))+"\n").encode())
+    if oldcfg==new:
+        save_state(i,len(profiles),"unchanged"); return "Подписка обновлена; активная конфигурация не изменилась"
+    atomic(CONFIG,new)
+    if active():
+        try: restart()
+        except Exception as e:
+            if oldcfg is not None:
+                atomic(CONFIG,oldcfg)
+                try: restart()
+                except Exception as re: log("КРИТИЧЕСКИЙ ОТКАТ НЕ УДАЛСЯ: "+str(re))
+            if oldsub is not None: atomic(SUB,oldsub)
+            raise RuntimeError("Обновление откатано: "+str(e))
+    atomic(LAST,new); save_state(i,len(profiles),"updated")
+    return f"Подписка обновлена, профилей: {len(profiles)}"
+def profiles():
+    ps=json.loads(SUB.read_text()); cfg=settings(); i=active_index(cfg)
+    print(json.dumps({"active_profile":i,"profile_count":len(ps),"profiles":[{"index":n,"name":p.get("remarks") or f"Профиль {n+1}","active":n==i} for n,p in enumerate(ps)]},ensure_ascii=False))
+def main():
+    cmd=sys.argv[1] if len(sys.argv)>1 else ""
+    if cmd=="profiles": profiles(); return
+    if cmd not in ("update","select"): raise ValueError("Использование: xray-gateway profiles | update | select INDEX")
+    with LOCK.open("w") as f:
+        fcntl.flock(f,fcntl.LOCK_EX)
+        if cmd=="update": print(update())
+        else:
+            if len(sys.argv)!=3 or not sys.argv[2].isdigit(): raise ValueError("Индекс профиля должен быть целым числом")
+            ps=json.loads(SUB.read_text()); print(apply(int(sys.argv[2]),ps,"selected"))
+if __name__=="__main__":
+    try: main()
+    except Exception as e: log("ОШИБКА: "+str(e)); sys.exit(1)
