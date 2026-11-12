@@ -38,10 +38,16 @@ def run(args, timeout=300):
     return subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
 
 class H(BaseHTTPRequestHandler):
-    def reply(self, code, obj, ctype='application/json; charset=utf-8'):
+    def reply(self, code, obj, ctype='application/json; charset=utf-8', headers=None):
         raw = obj if isinstance(obj, bytes) else json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code); self.send_header('Content-Type', ctype)
-        self.send_header('Cache-Control', 'no-store'); self.send_header('Content-Length', str(len(raw)))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('Referrer-Policy', 'no-referrer')
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+        if headers:
+            for key, value in headers.items(): self.send_header(key, value)
+        self.send_header('Content-Length', str(len(raw)))
         self.end_headers(); self.wfile.write(raw)
 
     def guard(self):
