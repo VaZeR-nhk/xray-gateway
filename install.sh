@@ -87,19 +87,41 @@ done
 mkdir -p data
 chmod 700 data
 
-if [[ ! -s data/settings.conf ]]; then
-  echo
-  # URL подписки отображается при вводе, чтобы можно было проверить вставленное значение.
-  read -r -p "Remnawave subscription URL (HTTPS, ввод отображается): " SUB_URL
-  [[ "$SUB_URL" == https://* ]] || die "Нужен HTTPS URL подписки"
-  [[ "$SUB_URL" != *$'\n'* && "$SUB_URL" != *$'\r'* ]] || die "Некорректный URL"
-  printf 'SUBSCRIPTION_URL=%s\nUSER_AGENT=Happ\nACTIVE_PROFILE=0\nTPROXY_PORT=12345\nGATEWAY_IP=0.0.0.0\n' "$SUB_URL" > data/settings.conf
-  chmod 600 data/settings.conf
-  unset SUB_URL
+# Запрашиваем URL при каждом запуске установщика. Enter оставляет текущий URL.
+echo
+if [[ -s data/settings.conf ]]; then
+  read -r -p "Remnawave subscription URL (HTTPS; Enter — оставить текущую): " SUB_URL
+  if [[ -z "$SUB_URL" ]]; then
+    SUB_URL="$(sed -n 's/^SUBSCRIPTION_URL=//p' data/settings.conf | head -n1)"
+  fi
 else
-  log "Найден data/settings.conf — сохраняю существующие настройки подписки"
+  read -r -p "Remnawave subscription URL (HTTPS, ввод отображается): " SUB_URL
 fi
+[[ "$SUB_URL" == https://* ]] || die "Нужен HTTPS URL подписки"
+[[ "$SUB_URL" != *$'\\n'* && "$SUB_URL" != *$'\\r'* ]] || die "Некорректный URL"
 
+export XRAY_GATEWAY_SUBSCRIPTION_URL="$SUB_URL"
+python3 - <<'PYSETTINGS'
+import os, pathlib, tempfile
+p=pathlib.Path("data/settings.conf")
+value=os.environ["XRAY_GATEWAY_SUBSCRIPTION_URL"]
+lines=p.read_text().splitlines() if p.exists() else []
+out=[]; found=False
+for line in lines:
+    if line.startswith("SUBSCRIPTION_URL="):
+        out.append("SUBSCRIPTION_URL="+value); found=True
+    else:
+        out.append(line)
+if not found: out.insert(0,"SUBSCRIPTION_URL="+value)
+for key, default in (("USER_AGENT","Happ"),("ACTIVE_PROFILE","0"),("TPROXY_PORT","12345"),("GATEWAY_IP","0.0.0.0")):
+    if not any(x.startswith(key+"=") for x in out): out.append(key+"="+default)
+fd,tmp=tempfile.mkstemp(dir="data",prefix="settings.")
+with os.fdopen(fd,"w") as f:
+    f.write("\\n".join(out)+"\\n")
+os.chmod(tmp,0o600)
+os.replace(tmp,p)
+PYSETTINGS
+unset SUB_URL XRAY_GATEWAY_SUBSCRIPTION_URL
 if [[ ! -s data/web-auth ]]; then
   echo
   while true; do
