@@ -8,7 +8,7 @@ jobs:
   syntax:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Python syntax
         run: python3 -m py_compile gateway/app.py gateway/node_checks.py gateway/xray-gateway
       - name: Shell syntax
@@ -18,7 +18,7 @@ jobs:
   image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build Docker image
         run: docker build --build-arg XRAY_VERSION=26.11.9 -t xray-gateway:ci .
       - name: Container smoke test
