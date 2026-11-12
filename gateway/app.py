@@ -1,43 +1,38 @@
 #!/usr/bin/python3
-import os, json, base64, hmac, subprocess
+import os, json, base64, hmac, subprocess, secrets, hashlib, time, http.cookies
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from node_checks import get_checks, start_checks
 
 AUTH = Path("/etc/xray-gateway/web-auth")
 GATEWAY = "/usr/local/sbin/xray-gateway"
-HTML = """<!doctype html><html lang=ru><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Xray Gateway</title>
-<style>
-body{font:15px system-ui;max-width:1100px;margin:32px auto;padding:0 16px;background:#101722;color:#e7edf5}
-button{padding:9px 14px;margin:4px;border:0;border-radius:7px;cursor:pointer}button:disabled{opacity:.5;cursor:default}
-section{background:#1b2736;padding:18px;border-radius:12px;margin:14px 0}.profile{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #354357;padding:10px 0}
-.muted{color:#9caec3}#msg{white-space:pre-wrap}table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;padding:8px;border-bottom:1px solid #354357;vertical-align:top}th{color:#9caec3}
-.ok{color:#70d69a}.fail{color:#ff8585}.progress{color:#9caec3} .scroll{overflow-x:auto}
-</style>
-<h1>Xray Gateway</h1>
-<section><b>Состояние:</b> <span id=status>Загрузка</span><p class=muted id=updated></p>
-<button onclick=updateSub()>Обновить подписку</button></section>
-<section><h2>Подписка Remnawave</h2><p class=muted>Можно заменить URL подписки. Новый адрес сохраняется только после успешной загрузки и проверки профиля.</p>
-<input id=subscriptionUrl type=url placeholder='https://example.com/short-id' style='box-sizing:border-box;width:100%;padding:11px;border-radius:7px;border:1px solid #354357;background:#101722;color:#e7edf5'>
-<button onclick=changeSubscription()>Сохранить и загрузить</button></section>
-<section><h2>Профили</h2><div id=profiles></div></section>
-<section><h2>Проверка узлов подписки</h2><p class=muted>Каждый узел проверяется отдельным временным процессом Xray через локальный SOCKS. Основной Xray, активный профиль и исходная подписка не изменяются.</p>
-<button id=checkButton onclick=startChecks()>Проверить все узлы</button><span class=progress id=checkProgress></span>
-<div class=scroll><table><thead><tr><th>Профиль</th><th>Узел</th><th>Протокол</th><th>Адрес</th><th>Результат</th><th>Время</th><th>HTTP</th><th>Ошибка</th></tr></thead><tbody id=checkRows></tbody></table></div>
-</section><section><h2>Результат операции</h2><pre id=msg></pre></section>
-<script>
-const el=id=>document.getElementById(id);
-async function api(path,method='GET',body){let r=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store'});let j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);return j}
-async function refresh(){try{let [p,s]=await Promise.all([api('/api/profiles'),api('/api/status')]);el('status').textContent=s.service;el('updated').textContent='Активный профиль: '+(p.profiles[p.active_profile]?.name||'не определён')+' · Профилей: '+p.profile_count;el('profiles').replaceChildren();p.profiles.forEach(x=>{let d=document.createElement('div');d.className='profile';let n=document.createElement('span');n.textContent=(x.active?'● ':'')+x.name;let b=document.createElement('button');b.textContent=x.active?'Активен':'Применить';b.disabled=x.active;b.onclick=()=>selectProfile(x.index);d.append(n,b);el('profiles').append(d)})}catch(e){el('msg').textContent=e.message}}
-async function action(path,body){try{el('msg').textContent='Выполняется…';let r=await api(path,'POST',body);el('msg').textContent=r.output||'Готово';await refresh()}catch(e){el('msg').textContent=e.message}}
-async function selectProfile(index){if(confirm('Применить выбранный профиль?'))await action('/api/select',{index})}
-async function updateSub(){if(confirm('Загрузить подписку Remnawave?'))await action('/api/update',{})}
-async function changeSubscription(){let url=el('subscriptionUrl').value.trim();if(!url)return alert('Укажите HTTPS URL подписки');if(!url.startsWith('https://'))return alert('Разрешён только HTTPS');if(confirm('Заменить URL подписки и загрузить профили?')){await action('/api/subscription',{url});el('subscriptionUrl').value=''}}
-async function startChecks(){try{let r=await api('/api/checks','POST',{});renderChecks(r)}catch(e){el('checkProgress').textContent=e.message}}
-function renderChecks(s){el('checkProgress').textContent=s.running?'Проверено '+s.completed+' из '+s.total+'…':(s.error?'Ошибка: '+s.error:(s.finished_at?'Завершено '+s.completed+' из '+s.total:''));el('checkButton').disabled=s.running;let body=el('checkRows');body.replaceChildren();for(const x of s.results||[]){let tr=document.createElement('tr');let vals=[x.profile,x.tag,x.protocol,x.address+':'+x.port,x.status,x.latency_ms==null?'—':x.latency_ms+' ms',x.http_code||'—',x.error||''];vals.forEach((v,i)=>{let td=document.createElement('td');td.textContent=v;if(i===4)td.className=x.status==='OK'?'ok':'fail';tr.append(td)});body.append(tr)}}
-async function pollChecks(){try{renderChecks(await api('/api/checks'))}catch(e){el('checkProgress').textContent=e.message}}
-refresh();pollChecks();setInterval(refresh,10000);setInterval(pollChecks,2000);
-</script></html>"""
+STATIC = Path("/opt/xray-gateway/static")
+SESSION_KEY = Path("/etc/xray-gateway/session-secret")
+SESSION_TTL = 43200
+FAILURES = {}
+
+def session_key():
+    if not SESSION_KEY.exists():
+        SESSION_KEY.parent.mkdir(parents=True, exist_ok=True)
+        SESSION_KEY.write_bytes(secrets.token_bytes(32))
+        os.chmod(SESSION_KEY, 0o600)
+    return SESSION_KEY.read_bytes()
+
+def make_session(user):
+    exp = int(time.time()) + SESSION_TTL
+    payload = f"{user}|{exp}"
+    sig = hmac.new(session_key(), payload.encode(), hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(f"{payload}|{sig}".encode()).decode().rstrip("=")
+
+def valid_session(value):
+    try:
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)).decode()
+        user, exp, sig = raw.split("|", 2)
+        expected = hmac.new(session_key(), f"{user}|{exp}".encode(), hashlib.sha256).hexdigest()
+        saved_user = AUTH.read_text().strip().split(":", 1)[0]
+        return user == saved_user and int(exp) > int(time.time()) and hmac.compare_digest(sig, expected)
+    except Exception:
+        return False
 
 def run(args, timeout=300):
     return subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
@@ -49,68 +44,96 @@ class H(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store'); self.send_header('Content-Length', str(len(raw)))
         self.end_headers(); self.wfile.write(raw)
 
-    def auth(self):
-        try:
-            user, pw = AUTH.read_text().strip().split(':', 1)
-            value = self.headers.get('Authorization', '')
-            if not value.startswith('Basic '): return False
-            u, p = base64.b64decode(value[6:]).decode().split(':', 1)
-            return hmac.compare_digest(u, user) and hmac.compare_digest(p, pw)
-        except Exception:
-            return False
-
     def guard(self):
-        if self.auth(): return True
-        self.send_response(401); self.send_header('WWW-Authenticate', 'Basic realm="Xray Gateway"')
-        self.send_header('Content-Length', '0'); self.end_headers(); return False
+        jar = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
+        token = jar.get("xray_session")
+        if token and valid_session(token.value):
+            return True
+        self.reply(401, {"error": "Требуется авторизация"})
+        return False
 
     def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path == "/api/auth/status":
+            jar = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
+            token = jar.get("xray_session")
+            self.reply(200, {"authenticated": bool(token and valid_session(token.value))})
+            return
+        if path == "/":
+            self.reply(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
+            return
+        if path in ("/app.js", "/style.css"):
+            f = STATIC / path.lstrip("/")
+            if not f.is_file(): self.reply(404, {"error":"Not found"}); return
+            self.reply(200, f.read_bytes(), "application/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
+            return
         if not self.guard(): return
         try:
-            if self.path == '/': self.reply(200, HTML.encode(), 'text/html; charset=utf-8')
-            elif self.path == '/api/profiles':
-                r = run([GATEWAY, 'profiles'])
+            if path == "/api/profiles":
+                r = run([GATEWAY, "profiles"])
                 if r.returncode: raise RuntimeError(r.stdout)
                 self.reply(200, json.loads(r.stdout))
-            elif self.path == '/api/status':
-                r = run(['supervisorctl', 'status', 'xray'])
-                state = json.loads(Path('/etc/xray-gateway/state.json').read_text()) if Path('/etc/xray-gateway/state.json').exists() else {}
-                self.reply(200, {'service': 'running' if r.returncode == 0 and 'RUNNING' in r.stdout else 'stopped',
-                    'last_update': state.get('last_update'), 'action': state.get('action')})
-            elif self.path == '/api/logs':
-                r = run(['tail', '-n', '100', '/var/log/supervisor/xray.log', '/var/log/supervisor/gateway.log'])
-                self.reply(200, {'logs': r.stdout})
-            elif self.path == '/api/checks': self.reply(200, get_checks())
-            else: self.reply(404, {'error': 'Not found'})
-        except Exception as e: self.reply(500, {'error': str(e)})
+            elif path == "/api/status":
+                r = run(["supervisorctl", "status", "xray"])
+                state = json.loads(Path("/etc/xray-gateway/state.json").read_text()) if Path("/etc/xray-gateway/state.json").exists() else {}
+                sub = json.loads(Path("/etc/xray-gateway/subscription.json").read_text()) if Path("/etc/xray-gateway/subscription.json").exists() else []
+                self.reply(200, {"service":"running" if r.returncode == 0 and "RUNNING" in r.stdout else "stopped", "last_update":state.get("last_update"), "action":state.get("action"), "profile_count":len(sub) if isinstance(sub,list) else 0, "active_profile":state.get("active_profile")})
+            elif path == "/api/logs":
+                r = run(["tail","-n","150","/var/log/supervisor/xray.log","/var/log/supervisor/gateway.log"])
+                self.reply(200, {"logs":r.stdout})
+            elif path == "/api/checks": self.reply(200, get_checks())
+            else: self.reply(404, {"error":"Not found"})
+        except Exception as e: self.reply(500, {"error":str(e)})
 
     def do_POST(self):
+        path = self.path.split("?", 1)[0]
+        try:
+            n = int(self.headers.get("Content-Length", "0"))
+            if n > 8192: raise ValueError("Request too large")
+            body = json.loads(self.rfile.read(n) or b"{}")
+        except Exception as e:
+            self.reply(400, {"error":str(e)}); return
+        if path == "/api/auth/login":
+            ip = self.client_address[0]; now = time.time()
+            count, until = FAILURES.get(ip, (0, 0))
+            if count >= 5 and until > now:
+                self.reply(429, {"error":"Слишком много попыток. Подождите минуту."}); return
+            try: username, password = AUTH.read_text().strip().split(":", 1)
+            except Exception: self.reply(503, {"error":"Авторизация не настроена"}); return
+            if hmac.compare_digest(str(body.get("username","")), username) and hmac.compare_digest(str(body.get("password","")), password):
+                FAILURES.pop(ip, None)
+                value = f"xray_session={make_session(username)}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_TTL}"
+                if self.headers.get("X-Forwarded-Proto","").lower() == "https": value += "; Secure"
+                self.reply(200, {"authenticated":True}, headers={"Set-Cookie":value})
+            else:
+                FAILURES[ip] = (count + 1, now + 60)
+                self.reply(401, {"error":"Неверный логин или пароль"})
+            return
+        if path == "/api/auth/logout":
+            value = "xray_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"
+            if self.headers.get("X-Forwarded-Proto","").lower() == "https": value += "; Secure"
+            self.reply(200, {"authenticated":False}, headers={"Set-Cookie":value}); return
         if not self.guard(): return
         try:
-            n = int(self.headers.get('Content-Length', '0'))
-            if n > 4096: raise ValueError('Request too large')
-            body = json.loads(self.rfile.read(n) or b'{}')
-            if self.path == '/api/select':
-                i = body.get('index')
-                if not isinstance(i, int) or isinstance(i, bool) or i < 0: raise ValueError('Некорректный индекс')
-                args = [GATEWAY, 'select', str(i)]
-            elif self.path == '/api/update': args = [GATEWAY, 'update']; i = None
-            elif self.path == '/api/subscription':
-                url=body.get('url')
-                if not isinstance(url,str) or not url.startswith('https://') or len(url)>2048:
-                    raise ValueError('Укажите корректный HTTPS URL подписки')
-                args=[GATEWAY,'set-url',url]; i=None
-            elif self.path == '/api/checks':
+            if path == "/api/select":
+                i = body.get("index")
+                if not isinstance(i,int) or isinstance(i,bool) or i < 0: raise ValueError("Некорректный индекс")
+                args = [GATEWAY,"select",str(i)]
+            elif path == "/api/update": args = [GATEWAY,"update"]; i = None
+            elif path == "/api/subscription":
+                url = body.get("url")
+                if not isinstance(url,str) or not url.startswith("https://") or len(url)>2048 or any(c.isspace() for c in url): raise ValueError("Укажите корректный HTTPS URL без пробелов")
+                args = [GATEWAY,"set-url",url]; i = None
+            elif path == "/api/checks":
                 self.reply(202, start_checks()); return
-            else: self.reply(404, {'error': 'Not found'}); return
+            else: self.reply(404, {"error":"Not found"}); return
             r = run(args)
-            if r.returncode: self.reply(500, {'error': r.stdout}); return
+            if r.returncode: self.reply(500, {"error":r.stdout}); return
             if i is not None:
-                check = run([GATEWAY, 'profiles'])
-                if check.returncode or json.loads(check.stdout).get('active_profile') != i:
-                    raise RuntimeError('Панель не подтвердила применение выбранного профиля')
-            self.reply(200, {'output': r.stdout})
-        except Exception as e: self.reply(500, {'error': str(e)})
+                check = run([GATEWAY,"profiles"])
+                if check.returncode or json.loads(check.stdout).get("active_profile") != i: raise RuntimeError("Не удалось подтвердить применение профиля")
+            self.reply(200, {"output":r.stdout or "Готово"})
+        except Exception as e: self.reply(500, {"error":str(e)})
 
     def log_message(self, fmt, *args): print('[web] ' + fmt % args, flush=True)
 
