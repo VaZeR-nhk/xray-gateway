@@ -118,7 +118,7 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart=$INSTALL_PATH apply
 ExecStop=$INSTALL_PATH remove
-TimeoutStartSec=30
+TimeoutStartSec=75
 TimeoutStopSec=30
 
 [Install]
