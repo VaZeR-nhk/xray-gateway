@@ -34,7 +34,7 @@ apply_rules(){
   log "Ожидаю Xray TPROXY listener на порту 12345..."
   ready=no
   for _ in $(seq 1 30); do
-    if ss -H -lnutp 2>/dev/null | grep -Eq '(:|\\])12345[[:space:]]'; then ready=yes; break; fi
+    if ss -H -lnutp 2>/dev/null | grep -Eq ':12345[[:space:]]'; then ready=yes; break; fi
     sleep 2
   done
   [[ "$ready" == yes ]] || die "На порту 12345 нет listener Xray. Правила не установлены."
