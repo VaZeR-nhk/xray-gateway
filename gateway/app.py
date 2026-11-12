@@ -4,19 +4,23 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from node_checks import get_checks, start_checks
 
-AUTH = Path("/etc/xray-gateway/web-auth")
 GATEWAY = "/usr/local/sbin/xray-gateway"
 STATIC = Path("/opt/xray-gateway/static")
-SESSION_KEY = Path("/etc/xray-gateway/session-secret")
 SESSION_TTL = 43200
 FAILURES = {}
 
+def credentials():
+    user = os.environ.get("WEB_USERNAME", "")
+    password = os.environ.get("WEB_PASSWORD", "")
+    if not user or not password:
+        raise RuntimeError("WEB_USERNAME/WEB_PASSWORD не заданы в .env")
+    return user, password
+
 def session_key():
-    if not SESSION_KEY.exists():
-        SESSION_KEY.parent.mkdir(parents=True, exist_ok=True)
-        SESSION_KEY.write_bytes(secrets.token_bytes(32))
-        os.chmod(SESSION_KEY, 0o600)
-    return SESSION_KEY.read_bytes()
+    value = os.environ.get("SESSION_SECRET", "")
+    if len(value) < 64:
+        raise RuntimeError("SESSION_SECRET должен содержать не менее 64 hex-символов")
+    return bytes.fromhex(value)
 
 def make_session(user):
     exp = int(time.time()) + SESSION_TTL
@@ -29,7 +33,7 @@ def valid_session(value):
         raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)).decode()
         user, exp, sig = raw.split("|", 2)
         expected = hmac.new(session_key(), f"{user}|{exp}".encode(), hashlib.sha256).hexdigest()
-        saved_user = AUTH.read_text().strip().split(":", 1)[0]
+        saved_user, _ = credentials()
         return user == saved_user and int(exp) > int(time.time()) and hmac.compare_digest(sig, expected)
     except Exception:
         return False
@@ -104,8 +108,8 @@ class H(BaseHTTPRequestHandler):
             count, until = FAILURES.get(ip, (0, 0))
             if count >= 5 and until > now:
                 self.reply(429, {"error":"Слишком много попыток. Подождите минуту."}); return
-            try: username, password = AUTH.read_text().strip().split(":", 1)
-            except Exception: self.reply(503, {"error":"Авторизация не настроена"}); return
+            try: username, password = credentials()
+            except Exception as e: self.reply(503, {"error":str(e)}); return
             if hmac.compare_digest(str(body.get("username","")), username) and hmac.compare_digest(str(body.get("password","")), password):
                 FAILURES.pop(ip, None)
                 value = f"xray_session={make_session(username)}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_TTL}"
