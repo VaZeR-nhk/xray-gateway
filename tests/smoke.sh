@@ -4,9 +4,10 @@ IMAGE="${1:-xray-gateway:ci}"
 DATA=$(mktemp -d)
 NAME=xray-gateway-smoke
 OUT=$(mktemp)
+COOKIE=$(mktemp)
 cleanup(){
   docker rm -f "$NAME" >/dev/null 2>&1 || true
-  rm -rf "$DATA" "$OUT"
+  rm -rf "$DATA" "$OUT" "$COOKIE"
 }
 trap cleanup EXIT
 
@@ -45,7 +46,7 @@ docker exec "$NAME" test -s /usr/local/bin/geoip.dat
 
 ready=0
 for _ in $(seq 1 30); do
-  if curl -fsS --max-time 2 -u ci:ci-password-long http://127.0.0.1:18080/api/profiles > "$OUT"; then
+  if curl -fsS --max-time 2 -c "$COOKIE" -H "Content-Type: application/json" -d '{"username":"ci","password":"ci-password-long"}' http://127.0.0.1:18080/api/auth/login >/dev/null && curl -fsS --max-time 2 -b "$COOKIE" http://127.0.0.1:18080/api/profiles > "$OUT"; then
     ready=1
     break
   fi
@@ -80,13 +81,16 @@ if [[ "$services_ready" != 1 ]]; then
   exit 1
 fi
 
-STATUS=$(curl -fsS --max-time 5 -u ci:ci-password-long http://127.0.0.1:18080/api/status)
+STATUS=$(curl -fsS --max-time 5 -b "$COOKIE" http://127.0.0.1:18080/api/status)
 python3 - "$STATUS" <<'PY'
 import json,sys
 data=json.loads(sys.argv[1])
 assert data["service"] == "running", data
 PY
 
+curl -fsS --max-time 3 http://127.0.0.1:18080/ | grep -q "Xray Gateway"
+curl -fsS --max-time 3 http://127.0.0.1:18080/app.js | grep -q "function boot"
+docker exec "$NAME" test -s /etc/xray-gateway/session-secret
 docker exec "$NAME" supervisorctl status xray | grep -q RUNNING
 docker exec "$NAME" supervisorctl status web | grep -q RUNNING
 echo "Container smoke test passed."
