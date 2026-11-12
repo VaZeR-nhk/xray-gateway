@@ -24,12 +24,20 @@ apply_rules(){
   if nft list table inet "$TABLE" >/dev/null 2>&1; then
     die "Таблица nftables inet $TABLE уже существует. Не трогаю существующие правила."
   fi
-  if ip rule show | grep -Eq "^[[:space:]]*$RULE_PREF:.*fwmark $MARK(/0x1)?.*lookup $ROUTE_TABLE"; then
-    die "Правило ip rule с priority $RULE_PREF уже существует. Не трогаю его."
+  if ip rule show | grep -Eq "^[[:space:]]*$RULE_PREF:"; then
+    die "Priority $RULE_PREF уже занят в ip rule. Не трогаю существующую маршрутизацию."
   fi
   if ip route show table "$ROUTE_TABLE" | grep -q .; then
     die "Таблица маршрутизации $ROUTE_TABLE уже содержит маршруты. Выберите другую таблицу или разберите конфликт вручную."
   fi
+
+  log "Ожидаю Xray TPROXY listener на порту 12345..."
+  ready=no
+  for _ in $(seq 1 30); do
+    if ss -H -lnutp 2>/dev/null | grep -Eq '(:|\\])12345[[:space:]]'; then ready=yes; break; fi
+    sleep 2
+  done
+  [[ "$ready" == yes ]] || die "На порту 12345 нет listener Xray. Правила не установлены."
 
   ALL_RPF=$(sysctl -n net.ipv4.conf.all.rp_filter)
   IF_RPF=$(sysctl -n "net.ipv4.conf.$LAN_IF.rp_filter")
@@ -83,7 +91,7 @@ remove_rules(){
 
 install_service(){
   need_root
-  have ip; have nft; have sysctl; have systemctl; have python3
+  have ip; have ss; have nft; have sysctl; have systemctl; have python3
   local lan_if="${1:-}" lan_cidr="${2:-}"
   if [[ -z "$lan_if" ]]; then read -r -p "LAN interface (например br0): " lan_if; fi
   if [[ -z "$lan_cidr" ]]; then read -r -p "LAN CIDR (например 192.168.12.0/24): " lan_cidr; fi
