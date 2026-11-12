@@ -63,7 +63,8 @@ apply_rules(){
 table inet $TABLE {
   chain prerouting {
     type filter hook prerouting priority mangle; policy accept;
-    iifname "$LAN_IF" ip daddr $LAN_CIDR return\n    iifname "$LAN_IF" ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 } return
+    iifname "$LAN_IF" ip daddr $LAN_CIDR return
+    iifname "$LAN_IF" ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 } return
     iifname "$LAN_IF" meta nfproto ipv4 meta l4proto { tcp, udp } tproxy to :12345 meta mark set $MARK accept
   }
 }
@@ -79,7 +80,7 @@ remove_rules(){
     source "$STATE"
     nft delete table inet "$TABLE" >/dev/null 2>&1 || true
     ip rule del priority "$RULE_PREF" fwmark "$MARK"/0x1 lookup "$ROUTE_TABLE" >/dev/null 2>&1 || true
-    ip route flush table "$ROUTE_TABLE" >/dev/null 2>&1 || true
+    ip route del local 0.0.0.0/0 dev lo table "$ROUTE_TABLE" >/dev/null 2>&1 || true
     sysctl -q -w "net.ipv4.conf.all.rp_filter=$ALL_RPF" || true
     sysctl -q -w "net.ipv4.conf.$LAN_IF.rp_filter=$IF_RPF" || true
     rm -f "$STATE"
