@@ -1,0 +1,22 @@
+services:
+  xray-gateway:
+    build:
+      context: .
+      args:
+        XRAY_VERSION: ${XRAY_VERSION:-26.11.9}
+    image: vazer/xray-gateway:${XRAY_VERSION:-26.11.9}
+    container_name: xray-gateway
+    network_mode: host
+    restart: unless-stopped
+    init: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BIND_SERVICE
+      - SYS_RESOURCE
+    volumes:
+      - ./data:/etc/xray-gateway
+    environment:
+      XRAY_WEB_HOST: 0.0.0.0
+      XRAY_WEB_PORT: 8080
+    stop_grace_period: 30s
