@@ -33,7 +33,7 @@ required=('SUBSCRIPTION_URL','WEB_USERNAME','WEB_PASSWORD')
 missing=[k for k in required if not values.get(k)]
 if missing: raise SystemExit('Missing required .env values: '+', '.join(missing))
 for key in ('WEB_USERNAME','WEB_PASSWORD','SESSION_SECRET','SUBSCRIPTION_URL'):
-    if any(ch in values[key] for ch in '\\r\\n\\x00'): raise SystemExit('Invalid newline/NUL in '+key)
+    if any(ch in values[key] for ch in chr(10)+chr(13)+chr(0)): raise SystemExit('Invalid newline/NUL in '+key)
 if not re.fullmatch(r'[0-9a-fA-F]{64}',values['SESSION_SECRET']): raise SystemExit('SESSION_SECRET must be 64 hex characters')
 if not values['SUBSCRIPTION_URL'].startswith('https://'): raise SystemExit('SUBSCRIPTION_URL must use HTTPS')
 fd,tmp=tempfile.mkstemp(prefix='.env.',dir='.')
