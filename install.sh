@@ -111,25 +111,36 @@ if [[ ! -s data/web-auth ]]; then
     warn "Имя пользователя не должно быть пустым или содержать двоеточие. Повтори ввод."
   done
 
-  while true; do
-    # Пароль отображается при вводе — ввод не скрывается.
-    read -r -p "Web UI password (min 12 chars): " WEB_PASS
-    if [[ "${#WEB_PASS}" -lt 12 ]]; then
-      warn "Пароль должен содержать не менее 12 символов. Повтори ввод."
-      continue
-    fi
+  read -r -p "Сгенерировать пароль автоматически? [y/N]: " GENERATE_PASSWORD
+  case "${GENERATE_PASSWORD,,}" in
+    y|yes|д|да)
+      # 24 случайных байта в hex: 48 символов, безопасных для basic-auth.
+      WEB_PASS="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+      [[ "${#WEB_PASS}" -eq 48 ]] || die "Не удалось сгенерировать пароль"
+      log "Сгенерирован случайный пароль длиной 48 символов"
+      ;;
+    *)
+      while true; do
+        # Пароль отображается при вводе — ввод не скрывается.
+        read -r -p "Web UI password (min 12 chars): " WEB_PASS
+        if [[ "${#WEB_PASS}" -lt 12 ]]; then
+          warn "Пароль должен содержать не менее 12 символов. Повтори ввод."
+          continue
+        fi
 
-    read -r -p "Повтори пароль: " WEB_PASS_CONFIRM
-    if [[ "$WEB_PASS" != "$WEB_PASS_CONFIRM" ]]; then
-      warn "Пароли не совпадают. Начни ввод пароля заново."
-      continue
-    fi
-    break
-  done
+        read -r -p "Повтори пароль: " WEB_PASS_CONFIRM
+        if [[ "$WEB_PASS" != "$WEB_PASS_CONFIRM" ]]; then
+          warn "Пароли не совпадают. Начни ввод пароля заново."
+          continue
+        fi
+        break
+      done
+      ;;
+  esac
 
   printf '%s:%s\n' "$WEB_USER" "$WEB_PASS" > data/web-auth
   chmod 600 data/web-auth
-  unset WEB_PASS WEB_PASS_CONFIRM
+  unset WEB_PASS_CONFIRM
 else
   log "Найден data/web-auth — сохраняю существующую авторизацию панели"
 fi
@@ -155,8 +166,15 @@ fi
 SERVER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
 SERVER_IP="${SERVER_IP:-SERVER-IP}"
 
+# Читаем сохранённые реквизиты, в том числе при повторном запуске установщика.
+IFS=: read -r WEB_USER WEB_PASS < data/web-auth
+[[ -n "$WEB_USER" && -n "$WEB_PASS" ]] || die "Не удалось прочитать реквизиты Web UI"
+
 echo
 log "Установка завершена"
-echo "Web UI: http://$SERVER_IP:8080"
+echo "Web UI:  http://$SERVER_IP:8080"
+echo "Логин:   $WEB_USER"
+echo "Пароль:  $WEB_PASS"
+warn "Сохраните пароль в менеджере паролей. Он также хранится в /opt/xray-gateway/data/web-auth с правами 600."
 warn "Прозрачная маршрутизация (TPROXY) пока НЕ включена."
 warn "Не направляй LAN-трафик через сервер, пока отдельно не проверим панель, подписку, профили и host-network.sh."
