@@ -6,7 +6,7 @@ cd "$(dirname "$(readlink -f "$0")")"
 XRAY_UNIT=xray-gateway.service
 WEB_UNIT=xray-gateway-web.service
 DATA_DIR="$PWD/data"
-BACKUP_ROOT=/root
+BACKUP_ROOT=/opt/xray-gateway-backups
 MIGRATING=0
 DATA_COPIED=0
 XRAY_ACTIVE=no
@@ -58,6 +58,8 @@ chmod 700 "$DATA_DIR"
 
 STAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP="$BACKUP_ROOT/xray-gateway-native-$STAMP"
+mkdir -p "$BACKUP_ROOT"
+chmod 700 "$BACKUP_ROOT"
 mkdir -m 700 "$BACKUP"
 cp -a /etc/xray-gateway "$BACKUP/"
 [[ ! -d /opt/xray-gateway-web ]] || cp -a /opt/xray-gateway-web "$BACKUP/"
