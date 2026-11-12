@@ -99,10 +99,17 @@ install_service(){
   if [[ -z "$lan_cidr" ]]; then read -r -p "LAN CIDR (например 192.168.12.0/24): " lan_cidr; fi
   [[ "$lan_if" =~ ^[a-zA-Z0-9_.:-]+$ ]] || die "Некорректное имя интерфейса"
   ip link show dev "$lan_if" >/dev/null 2>&1 || die "Интерфейс $lan_if не существует"
-  python3 - "$lan_cidr" <<'PY'
+  LAN_ADDRS=$(ip -4 -o addr show dev "$lan_if" | awk '{print $4}')
+  python3 - "$lan_cidr" "$LAN_ADDRS" <<'PY'
 import ipaddress,sys
-n=ipaddress.ip_network(sys.argv[1], strict=False)
-if n.version != 4: raise SystemExit("Поддерживается только IPv4 LAN CIDR")
+network=ipaddress.ip_network(sys.argv[1], strict=False)
+if network.version != 4:
+    raise SystemExit("Поддерживается только IPv4 LAN CIDR")
+addresses=[ipaddress.ip_interface(x).ip for x in sys.argv[2].split() if x]
+if not addresses:
+    raise SystemExit("На выбранном интерфейсе нет IPv4-адреса")
+if not any(address in network for address in addresses):
+    raise SystemExit("LAN CIDR не совпадает ни с одним IPv4-адресом выбранного интерфейса")
 PY
   if [[ -e "$CONFIG" ]]; then die "$CONFIG уже существует; сначала проверьте текущую конфигурацию"; fi
   printf 'LAN_IF=%q\nLAN_CIDR=%q\n' "$lan_if" "$lan_cidr" > "$CONFIG"
