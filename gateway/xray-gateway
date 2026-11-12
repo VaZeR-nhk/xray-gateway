@@ -17,10 +17,16 @@ def atomic(path,data):
         raise
 def settings():
     d={}
-    for line in SETTINGS.read_text().splitlines():
+    envfile=BASE/".env"
+    for line in envfile.read_text().splitlines():
         line=line.strip()
         if line and not line.startswith("#") and "=" in line:
-            k,v=line.split("=",1); d[k.strip()]=v.strip()
+            k,v=line.split("=",1); d[k.strip()]=v.strip().strip('"').strip("'")
+    if SETTINGS.exists():
+        for line in SETTINGS.read_text().splitlines():
+            line=line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k,v=line.split("=",1); d.setdefault(k.strip(),v.strip())
     hp=BASE/"hwid"
     if not hp.exists(): atomic(hp,(str(uuid.uuid4())+"\n").encode())
     d["HWID"]=hp.read_text().strip()
@@ -74,21 +80,21 @@ def download(cfg):
 def set_subscription_url(value):
     value=value.strip()
     endpoint=subscription_endpoint(value)
-    old=SETTINGS.read_bytes()
-    lines=SETTINGS.read_text().splitlines()
-    replaced=False
-    out=[]
+    envfile=BASE/".env"
+    old=envfile.read_bytes()
+    lines=envfile.read_text().splitlines()
+    out=[]; replaced=False
     for line in lines:
         if line.strip().startswith("SUBSCRIPTION_URL="):
             out.append("SUBSCRIPTION_URL="+value); replaced=True
         else: out.append(line)
-    if not replaced: out.insert(0,"SUBSCRIPTION_URL="+value)
-    atomic(SETTINGS,("\n".join(out)+"\n").encode())
+    if not replaced: out.append("SUBSCRIPTION_URL="+value)
+    atomic(envfile,("\n".join(out)+"\n").encode())
     try:
         result=update()
         return result
     except Exception:
-        atomic(SETTINGS,old)
+        atomic(envfile,old)
         raise
 def active_index(cfg):
     if STATE.exists(): return int(json.loads(STATE.read_text()).get("active_profile",cfg.get("ACTIVE_PROFILE",0)))
