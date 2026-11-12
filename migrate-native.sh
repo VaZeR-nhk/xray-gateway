@@ -22,7 +22,11 @@ rollback(){
   rc=$?
   if [[ "$MIGRATING" == 1 ]]; then
     log "Ошибка миграции. Останавливаю Docker-стек и возвращаю native-службы."
-    docker compose down >/dev/null 2>&1 || true
+    if docker compose down >/dev/null 2>&1; then
+      find "$DATA_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    else
+      log "Не удалось остановить Docker-стек; каталог data сохранён для безопасности."
+    fi
     if [[ "$XRAY_ENABLED" == yes ]]; then systemctl enable "$XRAY_UNIT" >/dev/null 2>&1 || true; else systemctl disable "$XRAY_UNIT" >/dev/null 2>&1 || true; fi
     if [[ "$WEB_ENABLED" == yes ]]; then systemctl enable "$WEB_UNIT" >/dev/null 2>&1 || true; else systemctl disable "$WEB_UNIT" >/dev/null 2>&1 || true; fi
     if [[ "$XRAY_ACTIVE" == yes ]]; then systemctl start "$XRAY_UNIT" || log "Не удалось автоматически запустить $XRAY_UNIT"; fi
