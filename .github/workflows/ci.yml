@@ -6,7 +6,7 @@ on:
 
 jobs:
   syntax:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - name: Python syntax
@@ -16,7 +16,7 @@ jobs:
       - name: Docker Compose validation
         run: docker compose config --quiet
   image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - name: Build Docker image
