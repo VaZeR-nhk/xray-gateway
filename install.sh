@@ -171,6 +171,9 @@ if [[ ! -f .env ]]; then
   printf 'XRAY_VERSION=26.11.9\n' > .env
 fi
 
+log "Переношу все секреты и параметры в единый .env"
+bash configure-env.sh
+
 log "Проверяю конфигурацию Docker Compose"
 docker compose config --quiet
 
@@ -189,7 +192,8 @@ SERVER_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if (
 SERVER_IP="${SERVER_IP:-SERVER-IP}"
 
 # Читаем сохранённые реквизиты, в том числе при повторном запуске установщика.
-IFS=: read -r WEB_USER WEB_PASS < data/web-auth
+WEB_USER="$(sed -n 's/^WEB_USERNAME=//p' .env | tail -n1)"
+WEB_PASS="$(sed -n 's/^WEB_PASSWORD=//p' .env | tail -n1)"
 [[ -n "$WEB_USER" && -n "$WEB_PASS" ]] || die "Не удалось прочитать реквизиты Web UI"
 
 echo
