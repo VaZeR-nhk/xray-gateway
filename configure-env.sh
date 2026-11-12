@@ -38,7 +38,7 @@ if not re.fullmatch(r'[0-9a-fA-F]{64}',values['SESSION_SECRET']): raise SystemEx
 if not values['SUBSCRIPTION_URL'].startswith('https://'): raise SystemExit('SUBSCRIPTION_URL must use HTTPS')
 fd,tmp=tempfile.mkstemp(prefix='.env.',dir='.')
 with os.fdopen(fd,'w') as f:
-    for k,v in values.items(): f.write(f'{k}={v}\\n')
+    for k,v in values.items(): f.write(f'{k}={v}'+chr(10))
 os.chmod(tmp,0o600); os.replace(tmp,env)
 if auth.exists(): auth.unlink()
 settings=root/'data/settings.conf'
