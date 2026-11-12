@@ -15,7 +15,7 @@ On Debian 12/13 with Docker Engine and Compose v2:
 ```bash
 git clone https://github.com/VaZeR-nhk/xray-gateway.git
 cd xray-gateway
-./install.sh
+bash install.sh
 ```
 
 The installer asks for the Remnawave HTTPS subscription URL and Web UI credentials. Secrets, HAPP HWID, downloaded subscription and active profile state are stored under `./data`, not in Git.
@@ -25,10 +25,10 @@ Open `http://SERVER-IP:8080`.
 ## Operations
 
 ```bash
-./update.sh
+bash update.sh
 docker compose logs -f
 docker compose ps
-./uninstall.sh
+bash uninstall.sh
 ```
 
 Uninstall preserves `./data`.
