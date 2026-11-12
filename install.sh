@@ -89,8 +89,8 @@ chmod 700 data
 
 if [[ ! -s data/settings.conf ]]; then
   echo
-  read -r -s -p "Remnawave subscription URL (HTTPS, ввод скрыт): " SUB_URL
-  echo
+  # URL подписки отображается при вводе, чтобы можно было проверить вставленное значение.
+  read -r -p "Remnawave subscription URL (HTTPS, ввод отображается): " SUB_URL
   [[ "$SUB_URL" == https://* ]] || die "Нужен HTTPS URL подписки"
   [[ "$SUB_URL" != *$'\n'* && "$SUB_URL" != *$'\r'* ]] || die "Некорректный URL"
   printf 'SUBSCRIPTION_URL=%s\nUSER_AGENT=Happ\nACTIVE_PROFILE=0\nTPROXY_PORT=12345\nGATEWAY_IP=0.0.0.0\n' "$SUB_URL" > data/settings.conf
