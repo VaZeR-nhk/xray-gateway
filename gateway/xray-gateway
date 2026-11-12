@@ -83,7 +83,7 @@ def set_subscription_url(value):
             out.append("SUBSCRIPTION_URL="+value); replaced=True
         else: out.append(line)
     if not replaced: out.insert(0,"SUBSCRIPTION_URL="+value)
-    atomic(SETTINGS,("\\n".join(out)+"\\n").encode())
+    atomic(SETTINGS,("\n".join(out)+"\n").encode())
     try:
         result=update()
         return result
