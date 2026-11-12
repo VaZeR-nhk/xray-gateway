@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+IMAGE="${1:-xray-gateway:ci}"
+DATA=$(mktemp -d)
+NAME=xray-gateway-smoke
+OUT=$(mktemp)
+cleanup(){
+  docker rm -f "$NAME" >/dev/null 2>&1 || true
+  rm -rf "$DATA" "$OUT"
+}
+trap cleanup EXIT
+
+chmod 700 "$DATA"
+cat > "$DATA/settings.conf" <<'EOF'
+SUBSCRIPTION_URL=https://example.invalid/subscription
+USER_AGENT=Happ
+ACTIVE_PROFILE=0
+TPROXY_PORT=12345
+GATEWAY_IP=0.0.0.0
+EOF
+printf 'ci:ci-password-long\n' > "$DATA/web-auth"
+printf '11111111-1111-4111-8111-111111111111\n' > "$DATA/hwid"
+cat > "$DATA/subscription.json" <<'EOF'
+[{"remarks":"CI smoke profile","inbounds":[],"outbounds":[{"protocol":"freedom","tag":"direct"}],"routing":{"rules":[]}}]
+EOF
+cat > "$DATA/state.json" <<'EOF'
+{"active_profile":0,"profile_count":1,"status":"success","action":"fixture"}
+EOF
+cat > "$DATA/config.json" <<'EOF'
+{
+  "log":{"loglevel":"warning"},
+  "inbounds":[{"listen":"127.0.0.1","port":18081,"protocol":"socks","settings":{"auth":"noauth","udp":false}}],
+  "outbounds":[{"protocol":"freedom","tag":"direct"}]
+}
+EOF
+chmod 600 "$DATA"/*
+
+docker run -d --name "$NAME" --network host \
+  --cap-add NET_ADMIN --cap-add NET_RAW --cap-add NET_BIND_SERVICE \
+  -e XRAY_WEB_HOST=127.0.0.1 -e XRAY_WEB_PORT=18080 \
+  -v "$DATA:/etc/xray-gateway" "$IMAGE" >/dev/null
+
+ready=0
+for _ in $(seq 1 30); do
+  if curl -fsS --max-time 2 -u ci:ci-password-long http://127.0.0.1:18080/api/profiles > "$OUT"; then
+    ready=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$ready" != 1 ]]; then
+  docker logs "$NAME" || true
+  docker exec "$NAME" supervisorctl status || true
+  echo "Web API did not become ready" >&2
+  exit 1
+fi
+
+python3 - "$OUT" <<'PY'
+import json,sys
+data=json.load(open(sys.argv[1]))
+assert data["profile_count"] == 1, data
+assert data["profiles"][0]["name"] == "CI smoke profile", data
+assert data["active_profile"] == 0, data
+PY
+
+STATUS=$(curl -fsS --max-time 5 -u ci:ci-password-long http://127.0.0.1:18080/api/status)
+python3 - "$STATUS" <<'PY'
+import json,sys
+data=json.loads(sys.argv[1])
+assert data["service"] == "running", data
+PY
+
+docker exec "$NAME" supervisorctl status xray | grep -q RUNNING
+docker exec "$NAME" supervisorctl status web | grep -q RUNNING
+echo "Container smoke test passed."
