@@ -8,6 +8,7 @@ WEB_UNIT=xray-gateway-web.service
 DATA_DIR="$PWD/data"
 BACKUP_ROOT=/root
 MIGRATING=0
+DATA_COPIED=0
 XRAY_ACTIVE=no
 WEB_ACTIVE=no
 XRAY_ENABLED=no
@@ -31,6 +32,8 @@ rollback(){
     if [[ "$WEB_ENABLED" == yes ]]; then systemctl enable "$WEB_UNIT" >/dev/null 2>&1 || true; else systemctl disable "$WEB_UNIT" >/dev/null 2>&1 || true; fi
     if [[ "$XRAY_ACTIVE" == yes ]]; then systemctl start "$XRAY_UNIT" || log "Не удалось автоматически запустить $XRAY_UNIT"; fi
     if [[ "$WEB_ACTIVE" == yes ]]; then systemctl start "$WEB_UNIT" || log "Не удалось автоматически запустить $WEB_UNIT"; fi
+  elif [[ "$DATA_COPIED" == 1 ]]; then
+    find "$DATA_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   fi
   exit "$rc"
 }
@@ -63,6 +66,7 @@ cp -a "/etc/systemd/system/$XRAY_UNIT" "$BACKUP/systemd/" 2>/dev/null || true
 cp -a "/etc/systemd/system/$WEB_UNIT" "$BACKUP/systemd/" 2>/dev/null || true
 log "Резервная копия native-установки: $BACKUP"
 
+DATA_COPIED=1
 cp -a /etc/xray-gateway/. "$DATA_DIR/"
 chmod 700 "$DATA_DIR"
 chmod 600 "$DATA_DIR"/* 2>/dev/null || true
