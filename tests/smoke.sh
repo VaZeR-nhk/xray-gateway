@@ -81,6 +81,7 @@ assert data["dns"]["servers"] == ["1.1.1.1"], data
 assert data["outbounds"][0]["tag"] == "direct", data
 PY
 
+curl -fsS --max-time 5 -b "$COOKIE" http://127.0.0.1:18080/api/profiles > "$OUT"
 python3 - "$OUT" <<'PY'
 import json,sys
 data=json.load(open(sys.argv[1]))
