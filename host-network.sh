@@ -124,6 +124,22 @@ restore_rp_filter_state(){
         log "IPv6-интерфейс $iface исчез; его sysctl пропущен."
       fi
     done
+    # Interfaces created while host-network was active inherited default=1.
+    # Restore them to the original default policy captured at installation.
+    local known=no current_path current_iface j saved_iface
+    for current_path in /proc/sys/net/ipv6/conf/*/disable_ipv6; do
+      [[ -r "$current_path" ]] || continue
+      current_iface="${current_path%/disable_ipv6}"; current_iface="${current_iface##*/}"
+      [[ "$current_iface" != "all" && "$current_iface" != "default" ]] || continue
+      known=no
+      for ((j=0; j<IPV6_IFACE_COUNT; j++)); do
+        name_var="IPV6_IFACE_$j"; saved_iface="${!name_var:-}"
+        [[ "$saved_iface" == "$current_iface" ]] && { known=yes; break; }
+      done
+      if [[ "$known" == no ]]; then
+        sysctl -q -w "net.ipv6.conf.$current_iface.disable_ipv6=$DEFAULT_IPV6_DISABLE" || { log "Не удалось восстановить IPv6-политику нового интерфейса $current_iface"; return 1; }
+      fi
+    done
     log "Исходные значения IPv6 disable_ipv6 восстановлены."
   fi
   rm -f "$STATE"
@@ -375,6 +391,13 @@ diagnose(){
     value="$(sysctl -n "$key" 2>/dev/null || echo unavailable)"
     printf '  %-42s %s\n' "$key" "$value"
   done
+  echo "  disable_ipv6 по всем текущим интерфейсам:"
+  for path in /proc/sys/net/ipv6/conf/*/disable_ipv6; do
+    [[ -r "$path" ]] || continue
+    iface="${path%/disable_ipv6}"; iface="${iface##*/}"
+    printf '    %-16s %s\n' "$iface" "$(cat "$path")"
+  done
+  echo "  Установка отключит IPv6; исходные значения будут восстановлены при uninstall/rollback."
   echo "  IPv4 forwarding для локального TPROXY-пути не требуется."
   echo
   echo "[Policy routing / nftables conflicts]"
@@ -404,8 +427,10 @@ diagnose(){
   fi
   echo
   echo "[IPv6]"
-  echo "  IPv6 на самом шлюзе не отключается."
-  echo "  После установки IPv6-транзит с LAN будет блокироваться правилом nftables (fail-closed)."
+  echo "  Установка отключает IPv6 на all/default и всех текущих интерфейсах."
+  echo "  Новые интерфейсы наследуют disable_ipv6=1; при uninstall восстанавливаются к исходному default."
+  echo "  Исходные значения восстанавливаются при uninstall/rollback."
+  echo "  nftables IPv6 DROP остаётся дополнительной защитой (fail-closed)."
   echo "  IPv4/IPv6 forwarding sysctl не меняются."
 }
 
