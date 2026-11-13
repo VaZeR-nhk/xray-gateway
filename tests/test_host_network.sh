@@ -56,6 +56,15 @@ for value in 3 -1 abc ""; do
     exit 1
   fi
 done
+for value in 0 1; do
+  valid_ipv6_toggle "$value" || { echo "valid_ipv6_toggle rejected $value" >&2; exit 1; }
+done
+for value in 2 -1 abc ""; do
+  if valid_ipv6_toggle "$value"; then
+    echo "valid_ipv6_toggle unexpectedly accepted: $value" >&2
+    exit 1
+  fi
+done
 grep -Fq 'net.ipv4.conf.default.rp_filter' "$ROOT/host-network.sh"
 grep -Fq 'default не изменяется' "$ROOT/host-network.sh"
 grep -Fq 'net.ipv4.ip_forward' "$ROOT/host-network.sh"
@@ -63,3 +72,10 @@ grep -Fq 'IPv4 forwarding для локального TPROXY-пути не тр�
 grep -Fq 'check) shift; diagnose' "$ROOT/host-network.sh"
 grep -Fq 'Эффективный режим остальных интерфейсов будет сохранён' "$ROOT/host-network.sh"
 echo "Host sysctl audit tests passed."
+
+grep -Fq 'net.ipv6.conf.default.disable_ipv6=1' "$ROOT/host-network.sh"
+grep -Fq 'net.ipv6.conf.all.disable_ipv6=1' "$ROOT/host-network.sh"
+grep -Fq 'IPV6_IFACE_DISABLE_%d' "$ROOT/host-network.sh"
+grep -Fq 'Исходные значения IPv6 disable_ipv6 восстановлены' "$ROOT/host-network.sh"
+grep -Fq 'IPv6 будет отключён' "$ROOT/host-network.sh"
+echo "Host IPv6 disable/restore tests passed."
