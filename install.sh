@@ -182,7 +182,7 @@ for path in files:
 PYCHECK
 
 log "Проверяю синтаксис shell-скриптов"
-bash -n bootstrap.sh install.sh update.sh uninstall.sh host-network.sh tests/smoke.sh docker/entrypoint.sh docker/update-loop.sh
+bash -n install.sh update.sh uninstall.sh host-network.sh tests/smoke.sh docker/entrypoint.sh docker/update-loop.sh
 
 log "Проверяю Docker Compose"
 docker compose config --quiet
