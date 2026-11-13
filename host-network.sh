@@ -17,11 +17,21 @@ die(){ echo "ERROR: $*" >&2; exit 1; }
 need_root(){ [[ $(id -u) -eq 0 ]] || die "Запустите от root"; }
 have(){ command -v "$1" >/dev/null 2>&1 || die "Не найдена команда: $1"; }
 
+normalize_port(){
+  local raw="${1:-}" value
+  [[ "$raw" =~ ^[0-9]+$ ]] || return 1
+  value=$((10#$raw))
+  (( value >= 1 && value <= 65535 )) || return 1
+  printf '%s\\n' "$value"
+}
+
 apply_rules(){
   [[ -r "$CONFIG" ]] || die "Нет конфигурации $CONFIG"
   # shellcheck disable=SC1090
   source "$CONFIG"
-  [[ "${TPROXY_PORT:-}" =~ ^[0-9]+$ ]] && (( TPROXY_PORT >= 1 && TPROXY_PORT <= 65535 )) || die "Некорректный TPROXY_PORT в $CONFIG"
+  local normalized_port
+  normalized_port="$(normalize_port "${TPROXY_PORT:-}")" || die "Некорректный TPROXY_PORT в $CONFIG"
+  TPROXY_PORT="$normalized_port"
   ip link show dev "$LAN_IF" >/dev/null 2>&1 || die "Интерфейс $LAN_IF не существует"
   if nft list table inet "$TABLE" >/dev/null 2>&1; then
     die "Таблица nftables inet $TABLE уже существует. Не трогаю существующие правила."
@@ -118,10 +128,10 @@ PY
   local tproxy_port="$DEFAULT_TPROXY_PORT"
   local project_env="$(cd -- "$(dirname -- "$0")" && pwd)/.env"
   if [[ -f "$project_env" ]]; then
-    tproxy_port="$(awk -F= '$1 == "TPROXY_PORT" {sub(/^[^=]*=/, ""); value=$0} END {if (value != "") print value}' "$project_env")"
+    tproxy_port="$(awk -F= '/^[[:space:]]*TPROXY_PORT[[:space:]]*=/ {sub(/^[^=]*=/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); value=$0} END {if (value != "") print value}' "$project_env")"
     tproxy_port="${tproxy_port:-$DEFAULT_TPROXY_PORT}"
   fi
-  [[ "$tproxy_port" =~ ^[0-9]+$ ]] && (( tproxy_port >= 1 && tproxy_port <= 65535 )) || die "Некорректный TPROXY_PORT в .env"
+  tproxy_port="$(normalize_port "$tproxy_port")" || die "Некорректный TPROXY_PORT в .env"
   if [[ -e "$CONFIG" ]]; then die "$CONFIG уже существует; сначала проверьте текущую конфигурацию"; fi
   printf 'LAN_IF=%q\nLAN_CIDR=%q\nTPROXY_PORT=%q\n' "$lan_if" "$lan_cidr" "$tproxy_port" > "$CONFIG"
   chmod 600 "$CONFIG"
@@ -163,11 +173,13 @@ remove_installation(){
   log "Автозапуск TPROXY удалён."
 }
 
-need_root
-case "${1:-}" in
-  install) shift; install_service "${1:-}" "${2:-}" ;;
-  apply) apply_rules ;;
-  remove) remove_rules ;;
-  uninstall) remove_installation ;;
-  *) echo "Usage: bash host-network.sh install [LAN_IF] [LAN_CIDR] | apply | remove | uninstall"; exit 2 ;;
-esac
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  need_root
+  case "${1:-}" in
+    install) shift; install_service "${1:-}" "${2:-}" ;;
+    apply) apply_rules ;;
+    remove) remove_rules ;;
+    uninstall) remove_installation ;;
+    *) echo "Usage: bash host-network.sh install [LAN_IF] [LAN_CIDR] | apply | remove | uninstall"; exit 2 ;;
+  esac
+fi

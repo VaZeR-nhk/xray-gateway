@@ -15,6 +15,8 @@ trap cleanup EXIT
 
 python3 tests/test_hwid_headers.py
 python3 tests/test_routing_view.py
+python3 tests/test_tproxy.py
+bash tests/test_host_network.sh
 
 chmod 700 "$STATE"
 cat > "$ENVFILE" <<'EOF'
