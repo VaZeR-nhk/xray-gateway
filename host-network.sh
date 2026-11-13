@@ -319,7 +319,7 @@ diagnose(){
   done
   echo
   echo "[Forwarding — только аудит, скрипт не меняет эти значения]"
-  for key in net.ipv4.ip_forward net.ipv6.conf.all.forwarding net.ipv6.conf.default.forwarding net.ipv6.conf.all.disable_ipv6; do
+  for key in net.ipv4.ip_forward net.ipv6.conf.all.forwarding net.ipv6.conf.default.forwarding net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6; do
     value="$(sysctl -n "$key" 2>/dev/null || echo unavailable)"
     printf '  %-42s %s\n' "$key" "$value"
   done
