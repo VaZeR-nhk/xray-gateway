@@ -90,12 +90,12 @@ chmod 700 data
 # Запрашиваем URL при каждом запуске установщика. Enter оставляет текущий URL.
 echo
 if [[ -s data/settings.conf ]]; then
-  read -r -p "Remnawave subscription URL (HTTPS; Enter — оставить текущую): " SUB_URL
+  read -r -s -p "Remnawave subscription URL (HTTPS; Enter — оставить текущую): " SUB_URL; echo
   if [[ -z "$SUB_URL" ]]; then
     SUB_URL="$(sed -n 's/^SUBSCRIPTION_URL=//p' data/settings.conf | head -n1)"
   fi
 else
-  read -r -p "Remnawave subscription URL (HTTPS, ввод отображается): " SUB_URL
+  read -r -s -p "Remnawave subscription URL (HTTPS): " SUB_URL; echo
 fi
 [[ "$SUB_URL" == https://* ]] || die "Нужен HTTPS URL подписки"
 [[ "$SUB_URL" != *[[:space:]]* ]] || die "URL не должен содержать пробелы или управляющие символы"
@@ -143,14 +143,14 @@ if [[ ! -s data/web-auth ]]; then
       ;;
     *)
       while true; do
-        # Пароль отображается при вводе — ввод не скрывается.
-        read -r -p "Web UI password (min 12 chars): " WEB_PASS
+        # Пароль вводится скрыто.
+        read -r -s -p "Web UI password (min 12 chars): " WEB_PASS; echo
         if [[ "${#WEB_PASS}" -lt 12 ]]; then
           warn "Пароль должен содержать не менее 12 символов. Повтори ввод."
           continue
         fi
 
-        read -r -p "Повтори пароль: " WEB_PASS_CONFIRM
+        read -r -s -p "Повтори пароль: " WEB_PASS_CONFIRM; echo
         if [[ "$WEB_PASS" != "$WEB_PASS_CONFIRM" ]]; then
           warn "Пароли не совпадают. Начни ввод пароля заново."
           continue
@@ -201,6 +201,6 @@ log "Установка завершена"
 echo "Web UI:  http://$SERVER_IP:8080"
 echo "Логин:   $WEB_USER"
 echo "Пароль:  $WEB_PASS"
-warn "Сохраните пароль в менеджере паролей. Он также хранится в /opt/xray-gateway/data/web-auth с правами 600."
+warn "Сохраните пароль в менеджере паролей. Он также хранится в /opt/xray-gateway/.env с правами 600."
 warn "Прозрачная маршрутизация (TPROXY) пока НЕ включена."
 warn "Не направляй LAN-трафик через сервер, пока отдельно не проверим панель, подписку, профили и host-network.sh."
