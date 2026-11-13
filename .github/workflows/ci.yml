@@ -17,7 +17,7 @@ jobs:
               compile(Path(name).read_text(encoding='utf-8'), name, 'exec')
           PY
       - name: Shell syntax
-        run: bash -n bootstrap.sh install.sh update.sh uninstall.sh migrate-native.sh host-network.sh tests/smoke.sh docker/entrypoint.sh docker/update-loop.sh
+        run: bash -n bootstrap.sh install.sh update.sh uninstall.sh host-network.sh tests/smoke.sh docker/entrypoint.sh docker/update-loop.sh
       - name: Prepare CI environment
         run: cp .env.example .env && chmod 600 .env
       - name: Docker Compose validation
