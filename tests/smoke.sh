@@ -58,7 +58,7 @@ docker exec "$NAME" test -s /usr/local/bin/geosite.dat
 docker exec "$NAME" test -s /usr/local/bin/geoip.dat
 
 # Exercise the real Xray parser against the generated transparent inbound.
-docker exec "$NAME" python3 - <<'PY'
+docker exec -i "$NAME" python3 - <<'PY'
 import importlib.machinery
 import importlib.util
 import json
