@@ -46,6 +46,13 @@ for key, pattern in checks.items():
         raise SystemExit("Invalid or unsupported characters in " + key)
 if values["ENABLE_TPROXY"].lower() not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
     raise SystemExit("Invalid ENABLE_TPROXY")
+try:
+    tproxy_port = int(values["TPROXY_PORT"], 10)
+except ValueError:
+    raise SystemExit("Invalid TPROXY_PORT: expected an integer from 1 to 65535")
+if not 1 <= tproxy_port <= 65535:
+    raise SystemExit("Invalid TPROXY_PORT: expected an integer from 1 to 65535")
+values["TPROXY_PORT"] = str(tproxy_port)
 for key in ("XRAY_VERSION", "USER_AGENT", "ACTIVE_PROFILE", "TPROXY_PORT", "GATEWAY_IP"):
     if not re.fullmatch(r"[A-Za-z0-9._:-]+", values[key]):
         raise SystemExit("Invalid or unsupported characters in " + key)
