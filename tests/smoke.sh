@@ -6,9 +6,10 @@ ENVFILE=$(mktemp)
 NAME=xray-gateway-smoke
 OUT=$(mktemp)
 COOKIE=$(mktemp)
+PAGE=$(mktemp)
 cleanup(){
   docker rm -f "$NAME" >/dev/null 2>&1 || true
-  rm -rf "$STATE" "$ENVFILE" "$OUT" "$COOKIE"
+  rm -rf "$STATE" "$ENVFILE" "$OUT" "$COOKIE" "$PAGE"
 }
 trap cleanup EXIT
 
@@ -93,8 +94,10 @@ data=json.loads(sys.argv[1])
 assert data["service"] == "running", data
 PY
 
-curl -fsS --max-time 3 http://127.0.0.1:18080/ | grep -q "Xray Gateway"
-curl -fsS --max-time 3 http://127.0.0.1:18080/app.js | grep -q "function boot"
+curl -fsS --max-time 3 http://127.0.0.1:18080/ -o "$PAGE"
+grep -q "Xray Gateway" "$PAGE"
+curl -fsS --max-time 3 http://127.0.0.1:18080/app.js -o "$PAGE"
+grep -q "function boot" "$PAGE"
 docker exec "$NAME" test -s /etc/xray-gateway/.env
 docker exec "$NAME" supervisorctl status xray | grep -q RUNNING
 docker exec "$NAME" supervisorctl status web | grep -q RUNNING
