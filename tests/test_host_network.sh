@@ -45,3 +45,21 @@ grep -Fq 'Xray listen IP должен быть назначен выбранно
 grep -Fq "trap 'rollback_on_error 130; exit 130' INT" "$ROOT/host-network.sh"
 grep -Fq "trap 'rollback_on_error 143; exit 143' TERM" "$ROOT/host-network.sh"
 echo "Host TPROXY helper tests passed."
+
+# Linux rp_filter accepts 0 (disabled), 1 (strict), and 2 (loose).
+for value in 0 1 2; do
+  valid_rp_filter "$value" || { echo "valid_rp_filter rejected $value" >&2; exit 1; }
+done
+for value in 3 -1 abc ""; do
+  if valid_rp_filter "$value"; then
+    echo "valid_rp_filter unexpectedly accepted: $value" >&2
+    exit 1
+  fi
+done
+grep -Fq 'net.ipv4.conf.default.rp_filter' "$ROOT/host-network.sh"
+grep -Fq 'default не изменяется' "$ROOT/host-network.sh"
+grep -Fq 'net.ipv4.ip_forward' "$ROOT/host-network.sh"
+grep -Fq 'IPv4 forwarding для локального TPROXY-пути не требуется' "$ROOT/host-network.sh"
+grep -Fq 'check) shift; diagnose' "$ROOT/host-network.sh"
+grep -Fq 'Эффективный режим остальных интерфейсов будет сохранён' "$ROOT/host-network.sh"
+echo "Host sysctl audit tests passed."
