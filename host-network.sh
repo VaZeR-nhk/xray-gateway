@@ -10,6 +10,7 @@ INSTALL_PATH=/usr/local/sbin/xray-gateway-host-network
 CONFIG=/etc/xray-gateway-host-network.conf
 STATE=/var/lib/xray-gateway-host-network.state
 UNIT=/etc/systemd/system/xray-gateway-host-network.service
+DEFAULT_TPROXY_PORT=12345
 
 log(){ echo "[xray-gateway-host-network] $*"; }
 die(){ echo "ERROR: $*" >&2; exit 1; }
@@ -20,6 +21,7 @@ apply_rules(){
   [[ -r "$CONFIG" ]] || die "Нет конфигурации $CONFIG"
   # shellcheck disable=SC1090
   source "$CONFIG"
+  [[ "${TPROXY_PORT:-}" =~ ^[0-9]+$ ]] && (( TPROXY_PORT >= 1 && TPROXY_PORT <= 65535 )) || die "Некорректный TPROXY_PORT в $CONFIG"
   ip link show dev "$LAN_IF" >/dev/null 2>&1 || die "Интерфейс $LAN_IF не существует"
   if nft list table inet "$TABLE" >/dev/null 2>&1; then
     die "Таблица nftables inet $TABLE уже существует. Не трогаю существующие правила."
@@ -31,13 +33,13 @@ apply_rules(){
     die "Таблица маршрутизации $ROUTE_TABLE уже содержит маршруты. Выберите другую таблицу или разберите конфликт вручную."
   fi
 
-  log "Ожидаю Xray TPROXY listener на порту 12345..."
+  log "Ожидаю Xray TPROXY listener на порту $TPROXY_PORT..."
   ready=no
   for _ in $(seq 1 30); do
-    if ss -H -lnutp 2>/dev/null | grep -Eq ':12345[[:space:]]'; then ready=yes; break; fi
+    if ss -H -lnutp 2>/dev/null | grep -Eq ":${TPROXY_PORT}[[:space:]]"; then ready=yes; break; fi
     sleep 2
   done
-  [[ "$ready" == yes ]] || die "На порту 12345 нет listener Xray. Правила не установлены."
+  [[ "$ready" == yes ]] || die "На порту $TPROXY_PORT нет listener Xray. Правила не установлены."
 
   ALL_RPF=$(sysctl -n net.ipv4.conf.all.rp_filter)
   IF_RPF=$(sysctl -n "net.ipv4.conf.$LAN_IF.rp_filter")
@@ -64,14 +66,16 @@ table inet $TABLE {
   chain prerouting {
     type filter hook prerouting priority mangle; policy accept;
     iifname "$LAN_IF" fib daddr type local return
+    # IPv6 is deliberately fail-closed until a native IPv6 TPROXY path is implemented.
+    iifname "$LAN_IF" meta nfproto ipv6 drop
     iifname "$LAN_IF" ip daddr $LAN_CIDR return
     iifname "$LAN_IF" ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 } return
-    iifname "$LAN_IF" ip saddr $LAN_CIDR meta nfproto ipv4 meta l4proto { tcp, udp } tproxy to :12345 meta mark set $MARK accept
+    iifname "$LAN_IF" ip saddr $LAN_CIDR meta nfproto ipv4 meta l4proto { tcp, udp } tproxy to :$TPROXY_PORT meta mark set $MARK accept
   }
 }
 NFT
   trap - ERR
-  log "TPROXY включён: LAN=$LAN_IF, CIDR=$LAN_CIDR, порт=12345, mark=$MARK, table=$ROUTE_TABLE"
+  log "TPROXY включён: LAN=$LAN_IF, CIDR=$LAN_CIDR, порт=$TPROXY_PORT, mark=$MARK, table=$ROUTE_TABLE"
   log "Локальные/RFC1918/служебные IPv4 назначения исключены из перехвата."
 }
 
