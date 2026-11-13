@@ -12,7 +12,6 @@
 - `state/` — рабочее состояние: постоянный HAPP HWID, JSON подписки, активный профиль, текущая и последняя рабочая конфигурации.
 - `gateway/` — приложение и Web UI.
 - `docker/` — конфигурация контейнера и планировщик обновления.
-- `bootstrap.sh` — загрузка публичного репозитория и запуск установки.
 - `install.sh` — подготовка ОС, проверка, сборка и запуск.
 
 Старый каталог `data/`, файлы `settings.conf` и native-установка не читаются и не импортируются. Миграция со старой архитектуры в тестовой ветке не поддерживается. Для новой установки используйте чистый сервер.
@@ -31,10 +30,17 @@
 Выполнить от root на чистом Debian 12/13:
 
 ```bash
-apt-get update && apt-get install -y curl ca-certificates && bash -c "$(curl -fsSL https://raw.githubusercontent.com/VaZeR-nhk/xray-gateway/main/bootstrap.sh)"
+apt-get update
+apt-get install -y git
+mkdir -p /opt/xray-gateway
+cd /opt/xray-gateway
+git clone https://github.com/VaZeR-nhk/xray-gateway.git .
+git pull --ff-only origin main
+chmod +x install.sh
+bash install.sh
 ```
 
-Репозиторий публичный: GitHub Token не требуется.
+Репозиторий публичный: GitHub Token не требуется. Git Clone выполняется в уже созданный пустой каталог проекта; повторный `git pull --ff-only` фиксирует актуальность ветки перед установкой.
 
 При установке вводится HTTPS URL подписки (отображается открыто), логин Web UI и пароль (пароль вводится скрыто; можно сгенерировать автоматически). После успешной установки адрес панели, логин и пароль выводятся в консоль. Пароль также хранится в `/opt/xray-gateway/.env` с правами `600`.
 
@@ -89,7 +95,15 @@ docker compose logs --tail=100
 docker compose exec xray-gateway supervisorctl status
 ```
 
-Bootstrap обновляет публичный Git-клон fast-forward способом. При локальных изменениях или несовпадении origin он остановится, не выполняя reset.
+Для обновления исходников используйте обычный Git из каталога проекта:
+
+```bash
+cd /opt/xray-gateway
+git pull --ff-only origin main
+bash install.sh
+```
+
+Если в рабочем дереве есть локальные изменения, Git остановит обновление. Не используйте `git reset --hard` или `git clean`: сначала сохраните изменения. Файлы `.env` и `state/` не входят в Git и сохраняются при обновлении.
 
 ## Остановка
 
