@@ -51,6 +51,7 @@ save_rp_filter_state(){
     for path in /proc/sys/net/ipv4/conf/*/rp_filter; do
       [[ -r "$path" ]] || continue
       iface="${path%/rp_filter}"; iface="${iface##*/}"
+      [[ "$iface" != "all" && "$iface" != "default" ]] || continue
       value="$(cat "$path")"
       valid_rp_filter "$value" || die "Неожиданное значение rp_filter для интерфейса $iface: $value"
       printf 'IFACE_%d=%q\nIFACE_RPF_%d=%q\n' "$index" "$iface" "$index" "$value"
@@ -152,7 +153,7 @@ apply_rules(){
   for ((i=0; i<IFACE_COUNT; i++)); do
     name_var="IFACE_$i"; value_var="IFACE_RPF_$i"
     iface="${!name_var}"; value="${!value_var}"
-    if [[ "$iface" != "$LAN_IF" ]] && (( value < ALL_RPF )); then
+    if [[ "$iface" != "$LAN_IF" && "$iface" != "all" && "$iface" != "default" ]] && (( value < ALL_RPF )); then
       sysctl -q -w "net.ipv4.conf.$iface.rp_filter=$ALL_RPF"
     fi
   done
