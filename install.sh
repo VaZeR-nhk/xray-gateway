@@ -97,10 +97,10 @@ fi
 
 echo
 if [[ -n "${OLD[SUBSCRIPTION_URL]:-}" ]]; then
-  read -r -s -p "Remnawave subscription URL (Enter — оставить текущую): " SUB_URL; echo
+  read -r -p "Remnawave subscription URL (Enter — оставить текущую): " SUB_URL
   SUB_URL="${SUB_URL:-${OLD[SUBSCRIPTION_URL]}}"
 else
-  read -r -s -p "Remnawave subscription URL (HTTPS): " SUB_URL; echo
+  read -r -p "Remnawave subscription URL (HTTPS): " SUB_URL
 fi
 [[ "$SUB_URL" == https://* && "$SUB_URL" != *[[:space:]]* ]] || die "Нужен HTTPS URL без пробелов"
 [[ "$SUB_URL" =~ ^https://[A-Za-z0-9._~:/?%+=\&-]+$ ]] || die "URL содержит неподдерживаемые символы"
