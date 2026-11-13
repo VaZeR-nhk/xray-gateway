@@ -156,6 +156,21 @@ if not any(address in network for address in addresses): raise SystemExit("LAN_C
 if listen not in addresses: raise SystemExit("GATEWAY_IP не назначен выбранному LAN-интерфейсу")
 PYNETCHECK
 
+TPROXY_PORT="${OLD[TPROXY_PORT]:-12345}"
+read -r -p "TPROXY listen port [$TPROXY_PORT]: " INPUT_TPROXY_PORT
+TPROXY_PORT="${INPUT_TPROXY_PORT:-$TPROXY_PORT}"
+python3 - "$TPROXY_PORT" <<'PYPORT'
+import sys
+raw=sys.argv[1]
+if not raw.isascii() or not raw.isdecimal():
+    raise SystemExit("TPROXY_PORT должен быть целым числом")
+port=int(raw,10)
+if not 1 <= port <= 65535:
+    raise SystemExit("TPROXY_PORT должен находиться в диапазоне 1–65535")
+print(f"Порт TPROXY: {port}")
+PYPORT
+TPROXY_PORT="$(python3 -c 'import sys; print(int(sys.argv[1], 10))' "$TPROXY_PORT")"
+
 echo
 if [[ -n "${OLD[SUBSCRIPTION_URL]:-}" ]]; then
   read -r -p "Remnawave subscription URL (Enter — оставить текущую): " SUB_URL
@@ -194,7 +209,7 @@ fi
 export XRAY_GATEWAY_SUBSCRIPTION_URL="$SUB_URL" XRAY_GATEWAY_WEB_USERNAME="$WEB_USER" XRAY_GATEWAY_WEB_PASSWORD="$WEB_PASS"
 export XRAY_GATEWAY_USER_AGENT="${OLD[USER_AGENT]:-Happ}"
 export XRAY_GATEWAY_ACTIVE_PROFILE="${OLD[ACTIVE_PROFILE]:-0}"
-export XRAY_GATEWAY_TPROXY_PORT="${OLD[TPROXY_PORT]:-12345}"
+export XRAY_GATEWAY_TPROXY_PORT="$TPROXY_PORT"
 export XRAY_GATEWAY_GATEWAY_IP="$GATEWAY_IP"
 export XRAY_GATEWAY_LAN_IF="$LAN_IF"
 export XRAY_GATEWAY_LAN_CIDR="$LAN_CIDR"
