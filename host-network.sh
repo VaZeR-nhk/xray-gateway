@@ -123,7 +123,7 @@ PY
   fi
   [[ "$tproxy_port" =~ ^[0-9]+$ ]] && (( tproxy_port >= 1 && tproxy_port <= 65535 )) || die "Некорректный TPROXY_PORT в .env"
   if [[ -e "$CONFIG" ]]; then die "$CONFIG уже существует; сначала проверьте текущую конфигурацию"; fi
-  printf 'LAN_IF=%q\\nLAN_CIDR=%q\\nTPROXY_PORT=%q\\n' "$lan_if" "$lan_cidr" "$tproxy_port" > "$CONFIG"
+  printf 'LAN_IF=%q\nLAN_CIDR=%q\nTPROXY_PORT=%q\n' "$lan_if" "$lan_cidr" "$tproxy_port" > "$CONFIG"
   chmod 600 "$CONFIG"
   install -m 0755 "$0" "$INSTALL_PATH"
   cat > "$UNIT" <<EOF
