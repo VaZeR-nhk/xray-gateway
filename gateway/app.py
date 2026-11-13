@@ -3,6 +3,7 @@ import os, json, base64, hmac, subprocess, secrets, hashlib, time, http.cookies
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from node_checks import get_checks, start_checks
+from routing_view import load_routing_view
 
 GATEWAY = "/usr/local/sbin/xray-gateway"
 STATIC = Path("/opt/xray-gateway/static")
@@ -85,7 +86,9 @@ class H(BaseHTTPRequestHandler):
             return
         if not self.guard(): return
         try:
-            if path == "/api/profiles":
+            if path == "/api/routing":
+                self.reply(200, load_routing_view())
+            elif path == "/api/profiles":
                 r = run([GATEWAY, "profiles"])
                 if r.returncode: raise RuntimeError(r.stdout)
                 data = json.loads(r.stdout)
