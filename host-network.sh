@@ -31,6 +31,10 @@ valid_rp_filter(){
   [[ "${1:-}" =~ ^[012]$ ]]
 }
 
+valid_ipv6_toggle(){
+  [[ "${1:-}" =~ ^[01]$ ]]
+}
+
 read_rp_filter(){
   local key="$1" value
   value="$(sysctl -n "$key" 2>/dev/null)" || die "Не удалось прочитать $key"
@@ -39,15 +43,18 @@ read_rp_filter(){
 }
 
 save_rp_filter_state(){
-  local all_rpf default_rpf if_rpf tmp path iface value index=0
+  local all_rpf default_rpf if_rpf all_v6 default_v6 tmp path iface value index=0 v6_index=0
   all_rpf="$(read_rp_filter net.ipv4.conf.all.rp_filter)"
   default_rpf="$(read_rp_filter net.ipv4.conf.default.rp_filter)"
   if_rpf="$(read_rp_filter "net.ipv4.conf.$LAN_IF.rp_filter")"
+  all_v6="$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null)" || die "Не удалось прочитать net.ipv6.conf.all.disable_ipv6"
+  default_v6="$(sysctl -n net.ipv6.conf.default.disable_ipv6 2>/dev/null)" || die "Не удалось прочитать net.ipv6.conf.default.disable_ipv6"
+  valid_ipv6_toggle "$all_v6" || die "Неожиданное значение IPv6 all.disable_ipv6=$all_v6"
+  valid_ipv6_toggle "$default_v6" || die "Неожиданное значение IPv6 default.disable_ipv6=$default_v6"
   tmp="$STATE.tmp"
   umask 077
   {
-    printf 'STATE_VERSION=1\nALL_RPF=%q\nDEFAULT_RPF=%q\nIF_RPF=%q\nLAN_IF=%q\n' \
-      "$all_rpf" "$default_rpf" "$if_rpf" "$LAN_IF"
+    printf 'STATE_VERSION=2\nALL_RPF=%q\nDEFAULT_RPF=%q\nIF_RPF=%q\nLAN_IF=%q\n' "$all_rpf" "$default_rpf" "$if_rpf" "$LAN_IF"
     for path in /proc/sys/net/ipv4/conf/*/rp_filter; do
       [[ -r "$path" ]] || continue
       iface="${path%/rp_filter}"; iface="${iface##*/}"
@@ -57,26 +64,36 @@ save_rp_filter_state(){
       printf 'IFACE_%d=%q\nIFACE_RPF_%d=%q\n' "$index" "$iface" "$index" "$value"
       index=$((index+1))
     done
-    printf 'IFACE_COUNT=%q\n' "$index"
+    printf 'IFACE_COUNT=%q\nALL_IPV6_DISABLE=%q\nDEFAULT_IPV6_DISABLE=%q\n' "$index" "$all_v6" "$default_v6"
+    for path in /proc/sys/net/ipv6/conf/*/disable_ipv6; do
+      [[ -r "$path" ]] || continue
+      iface="${path%/disable_ipv6}"; iface="${iface##*/}"
+      [[ "$iface" != "all" && "$iface" != "default" ]] || continue
+      value="$(cat "$path")"
+      valid_ipv6_toggle "$value" || die "Неожиданное значение disable_ipv6 для интерфейса $iface: $value"
+      printf 'IPV6_IFACE_%d=%q\nIPV6_IFACE_DISABLE_%d=%q\n' "$v6_index" "$iface" "$v6_index" "$value"
+      v6_index=$((v6_index+1))
+    done
+    printf 'IPV6_IFACE_COUNT=%q\n' "$v6_index"
   } > "$tmp"
   chmod 600 "$tmp"
   mv -f "$tmp" "$STATE"
   log "Сохранён rp_filter: all=$all_rpf, default=$default_rpf, $LAN_IF=$if_rpf; интерфейсов=$index"
-  log "default не изменяется. Эффективный режим остальных интерфейсов будет сохранён."
+  log "Сохранён IPv6 disable_ipv6: all=$all_v6, default=$default_v6; интерфейсов=$v6_index"
+  log "IPv6 будет отключён на время работы host-network; при удалении исходные значения восстановятся."
 }
 
 restore_rp_filter_state(){
   [[ -r "$STATE" ]] || return 0
   # shellcheck disable=SC1090
   source "$STATE"
-  [[ "${STATE_VERSION:-}" == "1" ]] || { log "Неизвестная версия состояния sysctl"; return 1; }
+  [[ "${STATE_VERSION:-}" == "1" || "${STATE_VERSION:-}" == "2" ]] || { log "Неизвестная версия состояния sysctl"; return 1; }
   valid_rp_filter "${ALL_RPF:-}" || { log "Повреждено ALL_RPF"; return 1; }
   valid_rp_filter "${DEFAULT_RPF:-}" || { log "Повреждено DEFAULT_RPF"; return 1; }
   valid_rp_filter "${IF_RPF:-}" || { log "Повреждено IF_RPF"; return 1; }
   [[ "${LAN_IF:-}" =~ ^[a-zA-Z0-9_.:-]+$ ]] || { log "Повреждено LAN_IF"; return 1; }
   [[ "${IFACE_COUNT:-}" =~ ^[0-9]+$ ]] || { log "Поврежден IFACE_COUNT"; return 1; }
   local i name_var value_var iface value
-  # Restore per-interface values first, then the global all value.
   for ((i=0; i<IFACE_COUNT; i++)); do
     name_var="IFACE_$i"; value_var="IFACE_RPF_$i"
     iface="${!name_var:-}"; value="${!value_var:-}"
@@ -89,10 +106,29 @@ restore_rp_filter_state(){
     fi
   done
   sysctl -q -w "net.ipv4.conf.all.rp_filter=$ALL_RPF" || { log "Не удалось восстановить net.ipv4.conf.all.rp_filter"; return 1; }
+
+  if [[ "$STATE_VERSION" == "2" ]]; then
+    valid_ipv6_toggle "${ALL_IPV6_DISABLE:-}" || { log "Повреждено ALL_IPV6_DISABLE"; return 1; }
+    valid_ipv6_toggle "${DEFAULT_IPV6_DISABLE:-}" || { log "Повреждено DEFAULT_IPV6_DISABLE"; return 1; }
+    [[ "${IPV6_IFACE_COUNT:-}" =~ ^[0-9]+$ ]] || { log "Поврежден IPV6_IFACE_COUNT"; return 1; }
+    sysctl -q -w "net.ipv6.conf.all.disable_ipv6=$ALL_IPV6_DISABLE" || { log "Не удалось восстановить IPv6 all.disable_ipv6"; return 1; }
+    sysctl -q -w "net.ipv6.conf.default.disable_ipv6=$DEFAULT_IPV6_DISABLE" || { log "Не удалось восстановить IPv6 default.disable_ipv6"; return 1; }
+    for ((i=0; i<IPV6_IFACE_COUNT; i++)); do
+      name_var="IPV6_IFACE_$i"; value_var="IPV6_IFACE_DISABLE_$i"
+      iface="${!name_var:-}"; value="${!value_var:-}"
+      [[ "$iface" =~ ^[a-zA-Z0-9_.:-]+$ ]] || { log "Повреждено имя IPv6-интерфейса в state"; return 1; }
+      valid_ipv6_toggle "$value" || { log "Поврежден disable_ipv6 в state для $iface"; return 1; }
+      if [[ -e "/proc/sys/net/ipv6/conf/$iface/disable_ipv6" ]]; then
+        sysctl -q -w "net.ipv6.conf.$iface.disable_ipv6=$value" || { log "Не удалось восстановить IPv6 для $iface"; return 1; }
+      else
+        log "IPv6-интерфейс $iface исчез; его sysctl пропущен."
+      fi
+    done
+    log "Исходные значения IPv6 disable_ipv6 восстановлены."
+  fi
   rm -f "$STATE"
   log "Исходные значения rp_filter восстановлены; default не изменялся."
 }
-
 
 route_table_rule_exists(){
   local rules="${1:-}"
@@ -149,6 +185,22 @@ apply_rules(){
   trap 'rollback_on_error 130; exit 130' INT
   trap 'rollback_on_error 143; exit 143' TERM
   trap 'rollback_on_error 129; exit 129' HUP
+
+  # Disable IPv6 globally, on current interfaces, and for interfaces created later.
+  sysctl -q -w net.ipv6.conf.default.disable_ipv6=1
+  sysctl -q -w net.ipv6.conf.all.disable_ipv6=1
+  local ipv6_path ipv6_iface
+  for ipv6_path in /proc/sys/net/ipv6/conf/*/disable_ipv6; do
+    [[ -w "$ipv6_path" ]] || continue
+    ipv6_iface="${ipv6_path%/disable_ipv6}"; ipv6_iface="${ipv6_iface##*/}"
+    [[ "$ipv6_iface" != "all" && "$ipv6_iface" != "default" ]] || continue
+    sysctl -q -w "net.ipv6.conf.$ipv6_iface.disable_ipv6=1"
+  done
+  for ipv6_path in /proc/sys/net/ipv6/conf/*/disable_ipv6; do
+    [[ -r "$ipv6_path" ]] || continue
+    [[ "$(cat "$ipv6_path")" == "1" ]] || die "IPv6 не удалось отключить: $ipv6_path"
+  done
+  log "IPv6 отключён: all, default и все текущие интерфейсы; новые интерфейсы наследуют disable_ipv6=1."
 
   # Preserve the effective rp_filter mode on every non-LAN interface:
   # lowering conf.all changes the max(conf/all, conf/interface) calculation.
