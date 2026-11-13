@@ -144,6 +144,17 @@ PYNET
 else
   echo "Сохранённая сеть: интерфейс=$LAN_IF, LAN=$LAN_CIDR, Xray listen=$GATEWAY_IP"
 fi
+ip link show dev "$LAN_IF" >/dev/null 2>&1 || die "Сохранённый LAN-интерфейс $LAN_IF не существует"
+LAN_ADDRESSES="$(ip -o -4 addr show scope global dev "$LAN_IF" | awk '{print $4}')"
+python3 - "$LAN_CIDR" "$GATEWAY_IP" "$LAN_ADDRESSES" <<'PYNETCHECK'
+import ipaddress,sys
+network=ipaddress.ip_network(sys.argv[1], strict=False)
+listen=ipaddress.ip_address(sys.argv[2])
+addresses=[ipaddress.ip_interface(x).ip for x in sys.argv[3].split() if x]
+if network.version != 4: raise SystemExit("LAN_CIDR должен быть IPv4")
+if not any(address in network for address in addresses): raise SystemExit("LAN_CIDR не соответствует интерфейсу")
+if listen not in addresses: raise SystemExit("GATEWAY_IP не назначен выбранному LAN-интерфейсу")
+PYNETCHECK
 
 echo
 if [[ -n "${OLD[SUBSCRIPTION_URL]:-}" ]]; then
