@@ -78,7 +78,7 @@ apply_rules(){
     sysctl -q -w "net.ipv4.conf.all.rp_filter=$ALL_RPF" || true
     sysctl -q -w "net.ipv4.conf.$LAN_IF.rp_filter=$IF_RPF" || true
     rm -f "$STATE"
-    return "$rc"
+    return 0
   }
   trap 'rc=$?; rollback_on_error "$rc"; exit "$rc"' ERR
   trap 'rollback_on_error 130; exit 130' INT
