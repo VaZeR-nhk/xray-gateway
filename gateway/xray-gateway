@@ -16,13 +16,19 @@ def atomic(path,data):
         except OSError: pass
         raise
 def settings():
+    import re
     d={}
     envfile=BASE/".env"
     for line in envfile.read_text().splitlines():
         line=line.strip()
         if line and not line.startswith("#") and "=" in line:
-            k,v=line.split("=",1); d[k.strip()]=v.strip().strip('"').strip("'")
-
+            k,v=line.split("=",1); d[k.strip()]=v.strip()
+    if not re.fullmatch(r"https://[A-Za-z0-9._~:/?%+=&-]+",d.get("SUBSCRIPTION_URL","")):
+        raise ValueError("SUBSCRIPTION_URL содержит неподдерживаемые символы или не является HTTPS URL")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+",d.get("WEB_USERNAME","")):
+        raise ValueError("Некорректный WEB_USERNAME в .env")
+    if not re.fullmatch(r"[A-Za-z0-9._~!@%+=,-]{12,}",d.get("WEB_PASSWORD","")):
+        raise ValueError("Некорректный WEB_PASSWORD в .env")
     hp=BASE/"hwid"
     if not hp.exists(): atomic(hp,(str(uuid.uuid4())+"\n").encode())
     d["HWID"]=hp.read_text().strip()
@@ -74,7 +80,10 @@ def download(cfg):
     log(f"Подписка получена: профилей {len(profiles)}; источник: /json")
     return profiles
 def set_subscription_url(value):
+    import re
     value=value.strip()
+    if not re.fullmatch(r"https://[A-Za-z0-9._~:/?%+=&-]+",value):
+        raise ValueError("URL должен быть HTTPS и содержать только безопасные символы")
     endpoint=subscription_endpoint(value)
     envfile=BASE/".env"
     old=envfile.read_bytes()
