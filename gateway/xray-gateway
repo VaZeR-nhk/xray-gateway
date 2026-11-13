@@ -135,7 +135,14 @@ def build(profile,cfg):
     p=json.loads(json.dumps(profile))
     p.setdefault("inbounds",[])[:] = [x for x in p.get("inbounds",[]) if x.get("tag")!="tproxy-in"]
     if cfg.get("ENABLE_TPROXY","false").lower() in ("1","true","yes","on"):
-        p["inbounds"].append({"tag":"tproxy-in","listen":cfg.get("GATEWAY_IP","0.0.0.0"),"port":int(cfg.get("TPROXY_PORT","12345")),"protocol":"dokodemo-door","settings":{"network":"tcp,udp","followRedirect":True},"sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True},"streamSettings":{"sockopt":{"tproxy":"tproxy"}}})
+        import re
+        raw_port=str(cfg.get("TPROXY_PORT","12345")).strip()
+        if not re.fullmatch(r"[0-9]+",raw_port):
+            raise ValueError("TPROXY_PORT должен быть целым числом от 1 до 65535")
+        port=int(raw_port,10)
+        if not 1 <= port <= 65535:
+            raise ValueError("TPROXY_PORT должен быть целым числом от 1 до 65535")
+        p["inbounds"].append({"tag":"tproxy-in","listen":cfg.get("GATEWAY_IP","0.0.0.0"),"port":port,"protocol":"dokodemo-door","settings":{"network":"tcp,udp","followRedirect":True},"sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True},"streamSettings":{"sockopt":{"tproxy":"tproxy"}}})
     return (json.dumps(p,ensure_ascii=False,indent=2)+"\n").encode()
 def validate(data):
     fd,tmp=tempfile.mkstemp(dir=BASE,prefix="check-",suffix=".json")
