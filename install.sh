@@ -94,14 +94,6 @@ if [[ -f .env ]]; then
     [[ -n "${key:-}" && "$key" != \\#* ]] && OLD["$key"]="$value"
   done < .env
 fi
-if [[ -f data/settings.conf ]]; then
-  while IFS='=' read -r key value; do
-    [[ -n "${key:-}" && "$key" != \#* ]] && OLD["$key"]="$value"
-  done < data/settings.conf
-fi
-if [[ -f data/web-auth ]]; then
-  IFS=: read -r OLD_WEB_USER OLD_WEB_PASS < data/web-auth || true
-fi
 
 echo
 if [[ -n "${OLD[SUBSCRIPTION_URL]:-}" ]]; then
@@ -113,8 +105,8 @@ fi
 [[ "$SUB_URL" == https://* && "$SUB_URL" != *[[:space:]]* ]] || die "Нужен HTTPS URL без пробелов"
 [[ "$SUB_URL" =~ ^https://[A-Za-z0-9._~:/?%+=\&-]+$ ]] || die "URL содержит неподдерживаемые символы"
 
-WEB_USER="${WEB_USERNAME:-${OLD[WEB_USERNAME]:-${OLD_WEB_USER:-admin}}}"
-WEB_PASS="${WEB_PASSWORD:-${OLD[WEB_PASSWORD]:-${OLD_WEB_PASS:-}}}"
+WEB_USER="${WEB_USERNAME:-${OLD[WEB_USERNAME]:-admin}}"
+WEB_PASS="${WEB_PASSWORD:-${OLD[WEB_PASSWORD]:-}}"
 if [[ -z "$WEB_PASS" ]]; then
   echo
   read -r -p "Web UI username [$WEB_USER]: " INPUT_USER
@@ -178,7 +170,6 @@ os.chmod(tmp, 0o600)
 os.replace(tmp, p)
 PYENV
 chmod 600 .env
-rm -f data/settings.conf data/web-auth
 unset SUB_URL WEB_PASS WEB_PASS_CONFIRM XRAY_GATEWAY_SUBSCRIPTION_URL XRAY_GATEWAY_WEB_USERNAME XRAY_GATEWAY_WEB_PASSWORD
 
 log "Проверяю конфигурацию Docker Compose"
