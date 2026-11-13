@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-import os,sys,json,uuid,fcntl,tempfile,subprocess,urllib.request,urllib.error,datetime,time,gzip
+import os,sys,json,uuid,fcntl,tempfile,subprocess,urllib.request,urllib.error,datetime,time,gzip,base64
 from urllib.parse import urlsplit,urlunsplit
 from pathlib import Path
 BASE=Path("/var/lib/xray-gateway"); ENV_FILE=Path("/etc/xray-gateway/.env")
@@ -49,6 +49,29 @@ def subscription_endpoint(value):
     path=parts.path.rstrip("/")
     if not path.endswith("/json"): path += "/json"
     return urlunsplit((parts.scheme,parts.netloc,path,parts.query,parts.fragment))
+def check_subscription_headers(headers):
+    """Stop before parsing a placeholder response when Remnawave reports an HWID problem."""
+    def enabled(name):
+        return str(headers.get(name,"")).strip().lower()=="true"
+
+    if enabled("x-hwid-max-devices-reached") or enabled("x-hwid-limit"):
+        message="Remnawave: достигнут лимит устройств по HWID."
+        announce=str(headers.get("announce","")).strip()
+        if announce.lower().startswith("base64:"):
+            try:
+                announce=base64.b64decode(announce[7:],validate=True).decode("utf-8").strip()
+            except Exception:
+                announce=""
+        # Keep administrator-provided text readable and prevent terminal control sequences.
+        announce=" ".join(announce.replace("\\r"," ").replace("\\n"," ").split())
+        if announce:
+            message+=f" Сообщение Remnawave: {announce[:500]}"
+        raise RuntimeError(message+" Удалите ненужное устройство в панели Remnawave и повторите обновление.")
+
+    if enabled("x-hwid-not-supported"):
+        raise RuntimeError("Remnawave не получил поддерживаемый HWID (x-hwid-not-supported). Проверьте заголовок x-hwid и настройки HWID Limit.")
+
+
 def download(cfg):
     import platform
     endpoint=subscription_endpoint(cfg["SUBSCRIPTION_URL"])
@@ -63,11 +86,15 @@ def download(cfg):
     })
     try:
         with urllib.request.urlopen(req,timeout=60) as r:
+            # Remnawave may return HTTP 200 with a placeholder JSON profile on HWID denial.
+            # Inspect response headers before reading or parsing the body.
+            check_subscription_headers(r.headers)
             raw=r.read()
             content_type=r.headers.get("Content-Type","unknown")
             encoding=r.headers.get("Content-Encoding","").lower()
         if encoding=="gzip": raw=gzip.decompress(raw)
     except urllib.error.HTTPError as e:
+        check_subscription_headers(e.headers or {})
         raise RuntimeError(f"Remnawave HTTP {e.code}; проверь URL подписки и доступ к /json") from e
     if not raw.strip(): raise ValueError("Remnawave вернул пустой ответ")
     try:
