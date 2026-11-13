@@ -22,7 +22,7 @@ normalize_port(){
   [[ "$raw" =~ ^[0-9]+$ ]] || return 1
   value=$((10#$raw))
   (( value >= 1 && value <= 65535 )) || return 1
-  printf '%s\\n' "$value"
+  printf '%s\n' "$value"
 }
 
 apply_rules(){
