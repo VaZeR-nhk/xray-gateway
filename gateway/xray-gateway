@@ -3,7 +3,7 @@ import os,sys,json,uuid,fcntl,tempfile,subprocess,urllib.request,urllib.error,da
 from urllib.parse import urlsplit,urlunsplit
 from pathlib import Path
 BASE=Path("/etc/xray-gateway")
-SETTINGS=BASE/"settings.conf"; SUB=BASE/"subscription.json"; CONFIG=BASE/"config.json"
+SUB=BASE/"subscription.json"; CONFIG=BASE/"config.json"
 STATE=BASE/"state.json"; LAST=BASE/"config.last-good.json"; LOCK=BASE/"gateway.lock"
 def log(s): print("[xray-gateway] "+str(s),flush=True)
 def atomic(path,data):
@@ -22,11 +22,7 @@ def settings():
         line=line.strip()
         if line and not line.startswith("#") and "=" in line:
             k,v=line.split("=",1); d[k.strip()]=v.strip().strip('"').strip("'")
-    if SETTINGS.exists():
-        for line in SETTINGS.read_text().splitlines():
-            line=line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k,v=line.split("=",1); d.setdefault(k.strip(),v.strip())
+
     hp=BASE/"hwid"
     if not hp.exists(): atomic(hp,(str(uuid.uuid4())+"\n").encode())
     d["HWID"]=hp.read_text().strip()
@@ -102,7 +98,8 @@ def active_index(cfg):
 def build(profile,cfg):
     p=json.loads(json.dumps(profile))
     p.setdefault("inbounds",[])[:] = [x for x in p.get("inbounds",[]) if x.get("tag")!="tproxy-in"]
-    p["inbounds"].append({"tag":"tproxy-in","listen":cfg.get("GATEWAY_IP","0.0.0.0"),"port":int(cfg.get("TPROXY_PORT","12345")),"protocol":"dokodemo-door","settings":{"network":"tcp,udp","followRedirect":True},"sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True},"streamSettings":{"sockopt":{"tproxy":"tproxy"}}})
+    if cfg.get("ENABLE_TPROXY","false").lower() in ("1","true","yes","on"):
+        p["inbounds"].append({"tag":"tproxy-in","listen":cfg.get("GATEWAY_IP","0.0.0.0"),"port":int(cfg.get("TPROXY_PORT","12345")),"protocol":"dokodemo-door","settings":{"network":"tcp,udp","followRedirect":True},"sniffing":{"enabled":True,"destOverride":["http","tls","quic"],"routeOnly":True},"streamSettings":{"sockopt":{"tproxy":"tproxy"}}})
     return (json.dumps(p,ensure_ascii=False,indent=2)+"\n").encode()
 def validate(data):
     fd,tmp=tempfile.mkstemp(dir=BASE,prefix="check-",suffix=".json")
