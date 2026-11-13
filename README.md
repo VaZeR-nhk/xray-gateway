@@ -93,12 +93,21 @@ docker compose logs --tail=100
 docker compose exec xray-gateway supervisorctl status
 ```
 
-Для обновления исходников используйте обычный Git из каталога проекта:
+Для обновления с полной проверкой (рекомендуемый вариант) используйте:
 
 ```bash
 cd /opt/xray-gateway
-git pull --ff-only origin main
-bash install.sh
+bash update.sh
+```
+
+Скрипт сам выполняет `git pull --ff-only`, запускает `install.sh`, пересобирает Docker-образ, проводит smoke test и только после успешной проверки обновляет контейнер.
+
+Если нужна только быстрая пересборка и перезапуск без smoke test:
+
+```bash
+cd /opt/xray-gateway
+git pull --ff-only
+docker compose up -d --build
 ```
 
 Файл `.env` и каталог `state/` исключены из Git через `.gitignore`: обычный `git pull` их не сравнивает, не перезаписывает и не удаляет. Остальные локальные изменения Git может не дать обновить — их нужно отдельно проверить, не применяя `reset --hard` или `git clean`.
