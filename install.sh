@@ -84,8 +84,8 @@ for CHECK_PATH in "$SCRIPT_DIR" "$DOCKER_ROOT"; do
   (( AVAIL_KB >= MIN_FREE_KB )) || die "Недостаточно места на разделе $CHECK_PATH: нужно не менее 1 GiB свободного места"
 done
 
-mkdir -p data
-chmod 700 data
+mkdir -p state
+chmod 700 state
 
 # Load existing installer settings from .env only.
 declare -A OLD=()
