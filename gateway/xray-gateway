@@ -2,7 +2,7 @@
 import os,sys,json,uuid,fcntl,tempfile,subprocess,urllib.request,urllib.error,datetime,time,gzip
 from urllib.parse import urlsplit,urlunsplit
 from pathlib import Path
-BASE=Path("/etc/xray-gateway")
+BASE=Path("/var/lib/xray-gateway"); ENV_FILE=Path("/etc/xray-gateway/.env")
 SUB=BASE/"subscription.json"; CONFIG=BASE/"config.json"
 STATE=BASE/"state.json"; LAST=BASE/"config.last-good.json"; LOCK=BASE/"gateway.lock"
 def log(s): print("[xray-gateway] "+str(s),flush=True)
@@ -18,7 +18,7 @@ def atomic(path,data):
 def settings():
     import re
     d={}
-    envfile=BASE/".env"
+    envfile=ENV_FILE
     for line in envfile.read_text().splitlines():
         line=line.strip()
         if line and not line.startswith("#") and "=" in line:
@@ -85,7 +85,7 @@ def set_subscription_url(value):
     if not re.fullmatch(r"https://[A-Za-z0-9._~:/?%+=&-]+",value):
         raise ValueError("URL должен быть HTTPS и содержать только безопасные символы")
     endpoint=subscription_endpoint(value)
-    envfile=BASE/".env"
+    envfile=ENV_FILE
     old=envfile.read_bytes()
     lines=envfile.read_text().splitlines()
     out=[]; replaced=False

@@ -84,8 +84,8 @@ for CHECK_PATH in "$SCRIPT_DIR" "$DOCKER_ROOT"; do
   (( AVAIL_KB >= MIN_FREE_KB )) || die "Недостаточно места на разделе $CHECK_PATH: нужно не менее 1 GiB свободного места"
 done
 
-mkdir -p data
-chmod 700 data
+mkdir -p state
+chmod 700 state
 
 # Load existing installer settings from .env only.
 declare -A OLD=()
@@ -182,7 +182,7 @@ for path in files:
 PYCHECK
 
 log "Проверяю синтаксис shell-скриптов"
-bash -n bootstrap.sh install.sh update.sh uninstall.sh migrate-native.sh host-network.sh tests/smoke.sh docker/entrypoint.sh docker/update-loop.sh
+bash -n bootstrap.sh install.sh update.sh uninstall.sh host-network.sh tests/smoke.sh docker/entrypoint.sh docker/update-loop.sh
 
 log "Проверяю Docker Compose"
 docker compose config --quiet

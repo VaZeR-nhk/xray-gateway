@@ -85,8 +85,8 @@ class H(BaseHTTPRequestHandler):
                 self.reply(200, json.loads(r.stdout))
             elif path == "/api/status":
                 r = run(["supervisorctl", "status", "xray"])
-                state = json.loads(Path("/etc/xray-gateway/state.json").read_text()) if Path("/etc/xray-gateway/state.json").exists() else {}
-                sub = json.loads(Path("/etc/xray-gateway/subscription.json").read_text()) if Path("/etc/xray-gateway/subscription.json").exists() else []
+                state = json.loads(Path("/var/lib/xray-gateway/state.json").read_text()) if Path("/var/lib/xray-gateway/state.json").exists() else {}
+                sub = json.loads(Path("/var/lib/xray-gateway/subscription.json").read_text()) if Path("/var/lib/xray-gateway/subscription.json").exists() else []
                 self.reply(200, {"service":"running" if r.returncode == 0 and "RUNNING" in r.stdout else "stopped", "last_update":state.get("last_update"), "action":state.get("action"), "profile_count":len(sub) if isinstance(sub,list) else 0, "active_profile":state.get("active_profile")})
             elif path == "/api/logs":
                 r = run(["tail","-n","150","/var/log/supervisor/xray.log","/var/log/supervisor/gateway.log"])
