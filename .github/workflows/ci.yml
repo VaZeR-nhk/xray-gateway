@@ -18,6 +18,8 @@ jobs:
           PY
       - name: Shell syntax
         run: bash -n install.sh update.sh uninstall.sh host-network.sh tests/smoke.sh tests/test_host_network.sh docker/entrypoint.sh docker/update-loop.sh
+      - name: Host network helper tests
+        run: bash tests/test_host_network.sh
       - name: Prepare CI environment
         run: cp .env.example .env && chmod 600 .env
       - name: Docker Compose validation
