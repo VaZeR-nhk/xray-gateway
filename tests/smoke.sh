@@ -72,6 +72,8 @@ import json,sys
 data=json.load(open(sys.argv[1]))
 assert data["profile_count"] == 1, data
 assert data["profiles"][0]["name"] == "CI smoke profile", data
+assert data["profiles"][0]["ping_ms"] is None, data
+assert data["profiles"][0]["best_node"] is None, data
 assert data["active_profile"] == 0, data
 PY
 
