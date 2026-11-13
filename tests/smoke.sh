@@ -14,6 +14,7 @@ cleanup(){
 trap cleanup EXIT
 
 python3 tests/test_hwid_headers.py
+python3 tests/test_routing_view.py
 
 chmod 700 "$STATE"
 cat > "$ENVFILE" <<'EOF'
@@ -37,6 +38,8 @@ cat > "$STATE/config.json" <<'EOF'
 {
   "log":{"loglevel":"warning"},
   "inbounds":[{"listen":"127.0.0.1","port":18081,"protocol":"socks","settings":{"auth":"noauth","udp":false}}],
+  "dns":{"queryStrategy":"UseIP","servers":["1.1.1.1"]},
+  "routing":{"domainStrategy":"AsIs","rules":[{"type":"field","domain":["geosite:private"],"outboundTag":"direct"}],"balancers":[]},
   "outbounds":[{"protocol":"freedom","tag":"direct"}]
 }
 EOF
@@ -67,6 +70,18 @@ if [[ "$ready" != 1 ]]; then
   exit 1
 fi
 
+curl -fsS --max-time 5 -b "$COOKIE" http://127.0.0.1:18080/api/routing > "$OUT"
+python3 - "$OUT" <<'PY'
+import json,sys
+data=json.load(open(sys.argv[1]))
+assert data["read_only"] is True, data
+assert data["source"] == "active_config", data
+assert data["routing"]["rules"][0]["outboundTag"] == "direct", data
+assert data["dns"]["servers"] == ["1.1.1.1"], data
+assert data["outbounds"][0]["tag"] == "direct", data
+PY
+
+curl -fsS --max-time 5 -b "$COOKIE" http://127.0.0.1:18080/api/profiles > "$OUT"
 python3 - "$OUT" <<'PY'
 import json,sys
 data=json.load(open(sys.argv[1]))

@@ -13,7 +13,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          for name in ('gateway/app.py', 'gateway/node_checks.py', 'gateway/xray-gateway'):
+          for name in ('gateway/app.py', 'gateway/node_checks.py', 'gateway/routing_view.py', 'gateway/xray-gateway', 'tests/test_routing_view.py'):
               compile(Path(name).read_text(encoding='utf-8'), name, 'exec')
           PY
       - name: Shell syntax
