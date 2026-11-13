@@ -131,6 +131,9 @@ apply_rules(){
 
   [[ ! -e "$STATE" ]] || die "Найден файл состояния $STATE; сначала проверьте предыдущую установку/откат."
   save_rp_filter_state
+  # Load the snapshot into this shell for the reversible per-interface adjustments.
+  # shellcheck disable=SC1090
+  source "$STATE"
 
   rollback_on_error(){
     local rc="${1:-1}"
@@ -357,12 +360,13 @@ diagnose(){
 remove_installation(){
   need_root
   if systemctl is-active --quiet "$NAME-host-network.service"; then
-    systemctl stop "$NAME-host-network.service" || true
+    systemctl stop "$NAME-host-network.service" || die "Не удалось остановить службу и восстановить sysctl; файлы состояния сохранены."
   else
     remove_rules
   fi
+  [[ ! -e "$STATE" ]] || die "Файл состояния $STATE ещё существует. Не удаляю его и файлы восстановления."
   systemctl disable "$NAME-host-network.service" >/dev/null 2>&1 || true
-  rm -f "$UNIT" "$CONFIG" "$STATE"
+  rm -f "$UNIT" "$CONFIG"
   systemctl daemon-reload
   rm -f "$INSTALL_PATH"
   log "Автозапуск TPROXY удалён."
