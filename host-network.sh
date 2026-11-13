@@ -57,7 +57,7 @@ apply_rules(){
   log "Ожидаю Xray TPROXY listener на порту $TPROXY_PORT..."
   local ready=no
   for _ in $(seq 1 30); do
-    if ss -H -lnutp 2>/dev/null | grep -Eq ":${TPROXY_PORT}[[:space:]]"; then ready=yes; break; fi
+    if ss -H -lnutp 2>/dev/null | grep -Eq "(^|[[:space:]])(${GATEWAY_IP}|0\\.0\\.0\\.0|\\*):${TPROXY_PORT}([[:space:]]|$)"; then ready=yes; break; fi
     sleep 2
   done
   [[ "$ready" == yes ]] || die "На порту $TPROXY_PORT нет listener Xray. Правила не установлены."
