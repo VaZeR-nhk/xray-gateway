@@ -3,10 +3,10 @@ services:
     build:
       context: .
       args:
-        XRAY_VERSION: ${XRAY_VERSION:-26.11.9}
-    image: vazer/xray-gateway:${XRAY_VERSION:-26.11.9}
+        XRAY_VERSION: \${XRAY_VERSION:-26.11.9}
+    image: vazer/xray-gateway:\${XRAY_VERSION:-26.11.9}
     container_name: xray-gateway
-    hostname: ${HOSTNAME:-xray-gateway}
+    hostname: \${HOSTNAME:-xray-gateway}
     network_mode: host
     restart: unless-stopped
     init: true
@@ -18,7 +18,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data:/etc/xray-gateway
+      - ./state:/var/lib/xray-gateway
       - ./.env:/etc/xray-gateway/.env
     environment:
       XRAY_WEB_HOST: 0.0.0.0
