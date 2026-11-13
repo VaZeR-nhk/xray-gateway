@@ -89,6 +89,11 @@ chmod 700 data
 
 # Read legacy values only for one-time migration. New installs write directly to .env.
 declare -A OLD=()
+if [[ -f .env ]]; then
+  while IFS='=' read -r key value; do
+    [[ -n "${key:-}" && "$key" != \\#* ]] && OLD["$key"]="$value"
+  done < .env
+fi
 if [[ -f data/settings.conf ]]; then
   while IFS='=' read -r key value; do
     [[ -n "${key:-}" && "$key" != \#* ]] && OLD["$key"]="$value"
