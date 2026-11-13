@@ -52,7 +52,7 @@ docker exec "$NAME" test -s /usr/local/bin/geoip.dat
 
 ready=0
 for _ in $(seq 1 30); do
-  if curl -fsS --max-time 2 -c "$COOKIE" -H "Content-Type: application/json" -d '{"username":"ci","password":"ci-password-long"}' http://127.0.0.1:18080/api/auth/login >/dev/null && curl -fsS --max-time 2 -b "$COOKIE" http://127.0.0.1:18080/api/profiles > "$OUT"; then
+  if curl -fsS --max-time 2 -c "$COOKIE" -H "Content-Type: application/json" -d '{"username":"ci","password":"ci-password-long"}' http://127.0.0.1:18080/api/auth/login >/dev/null 2>&1 && curl -fsS --max-time 2 -b "$COOKIE" http://127.0.0.1:18080/api/profiles > "$OUT" 2>/dev/null; then
     ready=1
     break
   fi
