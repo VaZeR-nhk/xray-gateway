@@ -9,7 +9,7 @@ root = Path(".")
 env = root / ".env"
 values = {}
 
-# Existing .env values take precedence; legacy files are migration-only inputs.
+# .env is the only source of configuration values.
 if env.exists():
     for line in env.read_text().splitlines():
         if line and not line.lstrip().startswith("#") and "=" in line:
