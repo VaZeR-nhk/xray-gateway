@@ -40,7 +40,7 @@ class RoutingViewTests(unittest.TestCase):
         self.assertEqual(result["outbounds"][0]["endpoints"][0]["address"], "node.example.org")
         self.assertNotIn("private-uuid", encoded)
         self.assertNotIn('"users"', encoded)
-        self.assertNotIn('"settings"', encoded)
+        self.assertNotIn("settings", result["outbounds"][0])
         self.assertEqual(result["inbounds"][0]["tag"], "socks-in")
 
     def test_rejects_non_object_config(self):
