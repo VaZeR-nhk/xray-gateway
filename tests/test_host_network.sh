@@ -39,6 +39,8 @@ grep -Fq 'tproxy to :$TPROXY_PORT' "$ROOT/host-network.sh"
 # Existing packet-mark bits must survive; only the reserved project bit is ORed in.
 grep -Fq 'meta mark set meta mark | $MARK' "$ROOT/host-network.sh"
 grep -Fq 'fwmark "$MARK"/"$MARK_MASK"' "$ROOT/host-network.sh"
+grep -Fq 'GATEWAY_IP=%q' "$ROOT/host-network.sh"
+grep -Fq 'Xray listen IP должен быть назначен выбранному LAN-интерфейсу' "$ROOT/host-network.sh"
 # Interrupted setup must have explicit rollback handlers.
 grep -Fq "trap 'rollback_on_error 130; exit 130' INT" "$ROOT/host-network.sh"
 grep -Fq "trap 'rollback_on_error 143; exit 143' TERM" "$ROOT/host-network.sh"

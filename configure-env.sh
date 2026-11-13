@@ -22,6 +22,8 @@ defaults = {
     "ACTIVE_PROFILE": "0",
     "TPROXY_PORT": "12345",
     "GATEWAY_IP": "0.0.0.0",
+    "LAN_IF": "",
+    "LAN_CIDR": "",
     "ENABLE_TPROXY": "false",
     "SESSION_SECRET": secrets.token_hex(32),
 }
@@ -44,12 +46,26 @@ for key, pattern in checks.items():
         raise SystemExit("Invalid or unsupported characters in " + key)
 if values["ENABLE_TPROXY"].lower() not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
     raise SystemExit("Invalid ENABLE_TPROXY")
+try:
+    tproxy_port = int(values["TPROXY_PORT"], 10)
+except ValueError:
+    raise SystemExit("Invalid TPROXY_PORT: expected an integer from 1 to 65535")
+if not 1 <= tproxy_port <= 65535:
+    raise SystemExit("Invalid TPROXY_PORT: expected an integer from 1 to 65535")
+values["TPROXY_PORT"] = str(tproxy_port)
 for key in ("XRAY_VERSION", "USER_AGENT", "ACTIVE_PROFILE", "TPROXY_PORT", "GATEWAY_IP"):
     if not re.fullmatch(r"[A-Za-z0-9._:-]+", values[key]):
         raise SystemExit("Invalid or unsupported characters in " + key)
+for key in ("LAN_IF", "LAN_CIDR"):
+    if values[key] and not re.fullmatch(r"[A-Za-z0-9._:/-]+", values[key]):
+        raise SystemExit("Invalid or unsupported characters in " + key)
+if values["LAN_CIDR"]:
+    import ipaddress
+    if ipaddress.ip_network(values["LAN_CIDR"], strict=False).version != 4:
+        raise SystemExit("LAN_CIDR must be IPv4")
 
 order = ("XRAY_VERSION", "SUBSCRIPTION_URL", "USER_AGENT", "ACTIVE_PROFILE",
-         "TPROXY_PORT", "GATEWAY_IP", "ENABLE_TPROXY", "WEB_USERNAME",
+         "TPROXY_PORT", "GATEWAY_IP", "LAN_IF", "LAN_CIDR", "ENABLE_TPROXY", "WEB_USERNAME",
          "WEB_PASSWORD", "SESSION_SECRET")
 tmp = env.with_name(".env.new")
 tmp.write_text("".join(f"{key}={values[key]}\n" for key in order))

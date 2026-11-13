@@ -102,6 +102,75 @@ if [[ -f .env ]]; then
   done < .env
 fi
 
+# Select LAN interface and an exact IPv4 address for Xray's transparent inbound.
+LAN_IF="${OLD[LAN_IF]:-}"
+LAN_CIDR="${OLD[LAN_CIDR]:-}"
+GATEWAY_IP="${OLD[GATEWAY_IP]:-}"
+if [[ -z "$LAN_IF" || -z "$LAN_CIDR" || -z "$GATEWAY_IP" || "$GATEWAY_IP" == "0.0.0.0" ]]; then
+  echo
+  echo "Доступные IPv4-интерфейсы:"
+  mapfile -t NETWORK_ROWS < <(ip -o -4 addr show scope global | awk '{print $2, $4}')
+  (("${#NETWORK_ROWS[@]}" > 0)) || die "Не найден интерфейс с глобальным IPv4-адресом"
+  for i in "${!NETWORK_ROWS[@]}"; do printf "  %d) %s\n" "$((i+1))" "${NETWORK_ROWS[$i]}"; done
+  DEFAULT_IF="$(ip -4 route show default | awk 'NR==1 {print $5}')"
+  DEFAULT_INDEX=1
+  for i in "${!NETWORK_ROWS[@]}"; do
+    [[ "${NETWORK_ROWS[$i]%% *}" == "$DEFAULT_IF" ]] && DEFAULT_INDEX=$((i+1))
+  done
+  read -r -p "Выбери LAN-интерфейс [$DEFAULT_INDEX]: " NETWORK_CHOICE
+  NETWORK_CHOICE="${NETWORK_CHOICE:-$DEFAULT_INDEX}"
+  [[ "$NETWORK_CHOICE" =~ ^[0-9]+$ ]] && (( NETWORK_CHOICE >= 1 && NETWORK_CHOICE <= ${#NETWORK_ROWS[@]} )) || die "Некорректный выбор интерфейса"
+  SELECTED_ROW="${NETWORK_ROWS[$((NETWORK_CHOICE-1))]}"
+  LAN_IF="${SELECTED_ROW%% *}"
+  mapfile -t IF_ADDRESSES < <(ip -o -4 addr show scope global dev "$LAN_IF" | awk '{print $4}')
+  (("${#IF_ADDRESSES[@]}" > 0)) || die "На $LAN_IF нет глобального IPv4"
+  if (("${#IF_ADDRESSES[@]}" == 1)); then
+    SELECTED_ADDRESS="${IF_ADDRESSES[0]}"
+  else
+    echo "IPv4-адреса интерфейса $LAN_IF:"
+    for i in "${!IF_ADDRESSES[@]}"; do printf "  %d) %s\n" "$((i+1))" "${IF_ADDRESSES[$i]}"; done
+    read -r -p "Выбери адрес [1]: " ADDRESS_CHOICE
+    ADDRESS_CHOICE="${ADDRESS_CHOICE:-1}"
+    [[ "$ADDRESS_CHOICE" =~ ^[0-9]+$ ]] && (( ADDRESS_CHOICE >= 1 && ADDRESS_CHOICE <= ${#IF_ADDRESSES[@]} )) || die "Некорректный выбор IPv4-адреса"
+    SELECTED_ADDRESS="${IF_ADDRESSES[$((ADDRESS_CHOICE-1))]}"
+  fi
+  GATEWAY_IP="${SELECTED_ADDRESS%%/*}"
+  LAN_CIDR="$(python3 - "$SELECTED_ADDRESS" <<'PYNET'
+import ipaddress,sys
+print(ipaddress.ip_interface(sys.argv[1]).network)
+PYNET
+)"
+  echo "Выбрано: интерфейс=$LAN_IF, LAN=$LAN_CIDR, Xray listen=$GATEWAY_IP"
+else
+  echo "Сохранённая сеть: интерфейс=$LAN_IF, LAN=$LAN_CIDR, Xray listen=$GATEWAY_IP"
+fi
+ip link show dev "$LAN_IF" >/dev/null 2>&1 || die "Сохранённый LAN-интерфейс $LAN_IF не существует"
+LAN_ADDRESSES="$(ip -o -4 addr show scope global dev "$LAN_IF" | awk '{print $4}')"
+python3 - "$LAN_CIDR" "$GATEWAY_IP" "$LAN_ADDRESSES" <<'PYNETCHECK'
+import ipaddress,sys
+network=ipaddress.ip_network(sys.argv[1], strict=False)
+listen=ipaddress.ip_address(sys.argv[2])
+addresses=[ipaddress.ip_interface(x).ip for x in sys.argv[3].split() if x]
+if network.version != 4: raise SystemExit("LAN_CIDR должен быть IPv4")
+if not any(address in network for address in addresses): raise SystemExit("LAN_CIDR не соответствует интерфейсу")
+if listen not in addresses: raise SystemExit("GATEWAY_IP не назначен выбранному LAN-интерфейсу")
+PYNETCHECK
+
+TPROXY_PORT="${OLD[TPROXY_PORT]:-12345}"
+read -r -p "TPROXY listen port [$TPROXY_PORT]: " INPUT_TPROXY_PORT
+TPROXY_PORT="${INPUT_TPROXY_PORT:-$TPROXY_PORT}"
+python3 - "$TPROXY_PORT" <<'PYPORT'
+import sys
+raw=sys.argv[1]
+if not raw.isascii() or not raw.isdecimal():
+    raise SystemExit("TPROXY_PORT должен быть целым числом")
+port=int(raw,10)
+if not 1 <= port <= 65535:
+    raise SystemExit("TPROXY_PORT должен находиться в диапазоне 1–65535")
+print(f"Порт TPROXY: {port}")
+PYPORT
+TPROXY_PORT="$(python3 -c 'import sys; print(int(sys.argv[1], 10))' "$TPROXY_PORT")"
+
 echo
 if [[ -n "${OLD[SUBSCRIPTION_URL]:-}" ]]; then
   read -r -p "Remnawave subscription URL (Enter — оставить текущую): " SUB_URL
@@ -140,8 +209,10 @@ fi
 export XRAY_GATEWAY_SUBSCRIPTION_URL="$SUB_URL" XRAY_GATEWAY_WEB_USERNAME="$WEB_USER" XRAY_GATEWAY_WEB_PASSWORD="$WEB_PASS"
 export XRAY_GATEWAY_USER_AGENT="${OLD[USER_AGENT]:-Happ}"
 export XRAY_GATEWAY_ACTIVE_PROFILE="${OLD[ACTIVE_PROFILE]:-0}"
-export XRAY_GATEWAY_TPROXY_PORT="${OLD[TPROXY_PORT]:-12345}"
-export XRAY_GATEWAY_GATEWAY_IP="${OLD[GATEWAY_IP]:-0.0.0.0}"
+export XRAY_GATEWAY_TPROXY_PORT="$TPROXY_PORT"
+export XRAY_GATEWAY_GATEWAY_IP="$GATEWAY_IP"
+export XRAY_GATEWAY_LAN_IF="$LAN_IF"
+export XRAY_GATEWAY_LAN_CIDR="$LAN_CIDR"
 export XRAY_GATEWAY_ENABLE_TPROXY="${OLD[ENABLE_TPROXY]:-false}"
 export XRAY_GATEWAY_XRAY_VERSION="${OLD[XRAY_VERSION]:-26.11.9}"
 export XRAY_GATEWAY_SESSION_SECRET="${OLD[SESSION_SECRET]:-}"
@@ -156,6 +227,8 @@ values = {
     "ACTIVE_PROFILE": os.environ["XRAY_GATEWAY_ACTIVE_PROFILE"],
     "TPROXY_PORT": os.environ["XRAY_GATEWAY_TPROXY_PORT"],
     "GATEWAY_IP": os.environ["XRAY_GATEWAY_GATEWAY_IP"],
+    "LAN_IF": os.environ["XRAY_GATEWAY_LAN_IF"],
+    "LAN_CIDR": os.environ["XRAY_GATEWAY_LAN_CIDR"],
     "ENABLE_TPROXY": os.environ["XRAY_GATEWAY_ENABLE_TPROXY"],
     "WEB_USERNAME": os.environ["XRAY_GATEWAY_WEB_USERNAME"],
     "WEB_PASSWORD": os.environ["XRAY_GATEWAY_WEB_PASSWORD"],
@@ -177,7 +250,7 @@ os.chmod(tmp, 0o600)
 os.replace(tmp, p)
 PYENV
 chmod 600 .env
-unset SUB_URL WEB_PASS WEB_PASS_CONFIRM XRAY_GATEWAY_SUBSCRIPTION_URL XRAY_GATEWAY_WEB_USERNAME XRAY_GATEWAY_WEB_PASSWORD
+unset SUB_URL WEB_PASS WEB_PASS_CONFIRM XRAY_GATEWAY_SUBSCRIPTION_URL XRAY_GATEWAY_WEB_USERNAME XRAY_GATEWAY_WEB_PASSWORD XRAY_GATEWAY_GATEWAY_IP XRAY_GATEWAY_LAN_IF XRAY_GATEWAY_LAN_CIDR
 
 log "Проверяю синтаксис Python"
 python3 - <<'PYCHECK'
