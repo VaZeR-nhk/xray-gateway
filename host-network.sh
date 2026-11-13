@@ -128,23 +128,47 @@ remove_rules(){
 install_service(){
   need_root
   have ip; have ss; have nft; have sysctl; have systemctl; have python3
-  local lan_if="${1:-}" lan_cidr="${2:-}"
-  if [[ -z "$lan_if" ]]; then read -r -p "LAN interface (например br0): " lan_if; fi
-  if [[ -z "$lan_cidr" ]]; then read -r -p "LAN CIDR (например 192.168.12.0/24): " lan_cidr; fi
+  local lan_if="${1:-}" lan_cidr="${2:-}" listen_ip="${3:-}"
+  local project_env="$(cd -- "$(dirname -- "$0")" && pwd)/.env"
+  if [[ -f "$project_env" ]]; then
+    local env_lan_if env_lan_cidr env_gateway_ip
+    env_lan_if="$(awk -F= '$1=="LAN_IF"{print $2}' "$project_env" | tail -n1)"
+    env_lan_cidr="$(awk -F= '$1=="LAN_CIDR"{print $2}' "$project_env" | tail -n1)"
+    env_gateway_ip="$(awk -F= '$1=="GATEWAY_IP"{print $2}' "$project_env" | tail -n1)"
+    lan_if="${lan_if:-$env_lan_if}"
+    lan_cidr="${lan_cidr:-$env_lan_cidr}"
+    listen_ip="${listen_ip:-$env_gateway_ip}"
+  fi
+  if [[ -z "$lan_if" ]]; then
+    echo "Доступные IPv4-интерфейсы:"
+    ip -o -4 addr show scope global | awk '{printf "  %-16s %s\\n", $2, $4}'
+    read -r -p "LAN interface: " lan_if
+  fi
   [[ "$lan_if" =~ ^[a-zA-Z0-9_.:-]+$ ]] || die "Некорректное имя интерфейса"
   ip link show dev "$lan_if" >/dev/null 2>&1 || die "Интерфейс $lan_if не существует"
   local lan_addrs
-  lan_addrs="$(ip -4 -o addr show dev "$lan_if" | awk '{print $4}')"
-  python3 - "$lan_cidr" "$lan_addrs" <<'PY'
+  lan_addrs="$(ip -4 -o addr show scope global dev "$lan_if" | awk '{print $4}')"
+  [[ -n "$lan_addrs" ]] || die "На интерфейсе $lan_if нет глобального IPv4-адреса"
+  if [[ -z "$lan_cidr" ]]; then
+    local default_cidr
+    default_cidr="$(awk '{print $1; exit}' <<<"$lan_addrs")"
+    read -r -p "LAN CIDR [$default_cidr]: " input_cidr
+    lan_cidr="${input_cidr:-$default_cidr}"
+  fi
+  if [[ -z "$listen_ip" || "$listen_ip" == "0.0.0.0" ]]; then
+    local default_ip
+    default_ip="${lan_addrs%% *}"; default_ip="${default_ip%%/*}"
+    read -r -p "Xray listen IPv4 [$default_ip]: " input_ip
+    listen_ip="${input_ip:-$default_ip}"
+  fi
+  python3 - "$lan_cidr" "$lan_addrs" "$listen_ip" <<'PY'
 import ipaddress,sys
 network=ipaddress.ip_network(sys.argv[1], strict=False)
-if network.version != 4:
-    raise SystemExit("Поддерживается только IPv4 LAN CIDR")
+if network.version != 4: raise SystemExit("Поддерживается только IPv4 LAN CIDR")
 addresses=[ipaddress.ip_interface(x).ip for x in sys.argv[2].split() if x]
-if not addresses:
-    raise SystemExit("На выбранном интерфейсе нет IPv4-адреса")
-if not any(address in network for address in addresses):
-    raise SystemExit("LAN CIDR не совпадает ни с одним IPv4-адресом выбранного интерфейса")
+listen=ipaddress.ip_address(sys.argv[3])
+if not any(address in network for address in addresses): raise SystemExit("LAN CIDR не совпадает ни с одним IPv4-адресом выбранного интерфейса")
+if listen not in addresses: raise SystemExit("Xray listen IP должен быть назначен выбранному LAN-интерфейсу")
 PY
   local tproxy_port="$DEFAULT_TPROXY_PORT"
   local project_env="$(cd -- "$(dirname -- "$0")" && pwd)/.env"
@@ -156,7 +180,7 @@ PY
   [[ ! -e "$CONFIG" ]] || die "$CONFIG уже существует; сначала проверьте текущую конфигурацию"
   [[ ! -e "$UNIT" && ! -e "$INSTALL_PATH" ]] || die "Установка host-network уже существует; сначала проверьте её состояние"
 
-  printf 'LAN_IF=%q\nLAN_CIDR=%q\nTPROXY_PORT=%q\n' "$lan_if" "$lan_cidr" "$tproxy_port" > "$CONFIG"
+  printf 'LAN_IF=%q\nLAN_CIDR=%q\nGATEWAY_IP=%q\nTPROXY_PORT=%q\n' "$lan_if" "$lan_cidr" "$listen_ip" "$tproxy_port" > "$CONFIG"
   chmod 600 "$CONFIG"
   install -m 0755 "$0" "$INSTALL_PATH"
   cat > "$UNIT" <<EOF
@@ -186,6 +210,7 @@ EOF
     die "Не удалось включить $NAME-host-network.service; установка отменена."
   fi
   log "Установлено и включено автоприменение после перезагрузки."
+  log "Параметры: LAN=$lan_if, CIDR=$lan_cidr, Xray listen=$listen_ip:$tproxy_port."
   log "Проверка: nft list table inet $TABLE; ip rule show; ip route show table $ROUTE_TABLE"
 }
 
