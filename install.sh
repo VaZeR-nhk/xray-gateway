@@ -87,7 +87,7 @@ done
 mkdir -p data
 chmod 700 data
 
-# Read legacy values only for one-time migration. New installs write directly to .env.
+# Load existing installer settings from .env only.
 declare -A OLD=()
 if [[ -f .env ]]; then
   while IFS='=' read -r key value; do
