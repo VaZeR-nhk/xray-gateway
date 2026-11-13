@@ -43,7 +43,7 @@ log "Система: ${PRETTY_NAME}; архитектура: $ARCH"
 log "Обновляю индексы APT и устанавливаю системные зависимости"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl gnupg git jq iproute2 nftables
+apt-get install -y --no-install-recommends ca-certificates curl gnupg git jq iproute2 nftables python3
 
 command -v curl >/dev/null 2>&1 || die "Не удалось установить curl"
 curl --version | head -n 1
@@ -172,11 +172,31 @@ PYENV
 chmod 600 .env
 unset SUB_URL WEB_PASS WEB_PASS_CONFIRM XRAY_GATEWAY_SUBSCRIPTION_URL XRAY_GATEWAY_WEB_USERNAME XRAY_GATEWAY_WEB_PASSWORD
 
-log "Проверяю конфигурацию Docker Compose"
+log "Проверяю синтаксис Python"
+python3 - <<'PYCHECK'
+from pathlib import Path
+files = [Path("gateway/app.py"), Path("gateway/node_checks.py"), Path("gateway/xray-gateway")]
+for path in files:
+    compile(path.read_text(encoding="utf-8"), str(path), "exec")
+    print(f"  PASS {path}")
+PYCHECK
+
+log "Проверяю синтаксис shell-скриптов"
+bash -n bootstrap.sh install.sh update.sh uninstall.sh migrate-native.sh host-network.sh tests/smoke.sh docker/entrypoint.sh docker/update-loop.sh
+
+log "Проверяю Docker Compose"
 docker compose config --quiet
 
-log "Собираю образ и запускаю Xray Gateway"
-docker compose up -d --build
+log "Собираю Docker-образ"
+docker compose build xray-gateway
+IMAGE_ID="$(docker compose images -q xray-gateway | head -n1)"
+[[ -n "$IMAGE_ID" ]] || die "Docker Compose не вернул ID собранного образа"
+
+log "Запускаю container smoke test до замены рабочего контейнера"
+bash tests/smoke.sh "$IMAGE_ID"
+
+log "Проверки пройдены. Разворачиваю проверенный образ"
+docker compose up -d --no-build
 
 log "Проверяю состояние контейнера"
 sleep 3
