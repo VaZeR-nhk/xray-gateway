@@ -167,6 +167,8 @@ class H(BaseHTTPRequestHandler):
             else: self.reply(404, {"error":"Not found"}); return
             r = run(args)
             if r.returncode: self.reply(500, {"error":r.stdout}); return
+            if path in ("/api/update", "/api/subscription"):
+                start_checks()
             if i is not None:
                 check = run([GATEWAY,"profiles"])
                 if check.returncode or json.loads(check.stdout).get("active_profile") != i: raise RuntimeError("Не удалось подтвердить применение профиля")
@@ -174,5 +176,12 @@ class H(BaseHTTPRequestHandler):
         except Exception as e: self.reply(500, {"error":str(e)})
 
     def log_message(self, fmt, *args): print('[web] ' + fmt % args, flush=True)
+
+# The entrypoint has already completed the initial subscription update before Supervisor starts.
+# Start node checks in the background so the UI has latency data after the first page load.
+try:
+    start_checks()
+except Exception as e:
+    print('[checks] Не удалось запустить стартовую проверку: ' + str(e), flush=True)
 
 ThreadingHTTPServer((os.getenv('XRAY_WEB_HOST', '0.0.0.0'), int(os.getenv('XRAY_WEB_PORT', '8080'))), H).serve_forever()
