@@ -80,6 +80,7 @@ save_rp_filter_state(){
   mv -f "$tmp" "$STATE"
   log "Сохранён rp_filter: all=$all_rpf, default=$default_rpf, $LAN_IF=$if_rpf; интерфейсов=$index"
   log "Сохранён IPv6 disable_ipv6: all=$all_v6, default=$default_v6; интерфейсов=$v6_index"
+  log "default не изменяется. Эффективный режим остальных интерфейсов будет сохранён."
   log "IPv6 будет отключён на время работы host-network; при удалении исходные значения восстановятся."
 }
 
@@ -260,7 +261,7 @@ remove_rules(){
     ip -4 rule del priority "$RULE_PREF" fwmark "$MARK"/"$MARK_MASK" lookup "$ROUTE_TABLE" >/dev/null 2>&1 || true
     ip -4 route del local 0.0.0.0/0 dev lo table "$ROUTE_TABLE" >/dev/null 2>&1 || true
     restore_rp_filter_state || die "Не удалось восстановить rp_filter; состояние сохранено в $STATE"
-    log "Правила проекта удалены; исходный rp_filter восстановлен."
+    log "Правила проекта удалены; исходные rp_filter и IPv6 sysctl восстановлены."
   else
     log "Состояние не найдено; удалять нечего."
   fi
