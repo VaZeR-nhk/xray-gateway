@@ -115,17 +115,16 @@ def _run_one(target, direct_ip):
                 try:
                     r = subprocess.run([CURL, "--socks5-hostname", f"127.0.0.1:{port}",
                         "--connect-timeout", "5", "--max-time", "12", "--silent", "--show-error",
-                        "--fail", "--write-out", "\\n%{http_code} %{time_starttransfer}",
+                        "--fail", "--write-out", "|%{http_code}|%{time_starttransfer}",
                         "https://api.ipify.org?format=text"], text=True,
                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=14)
-                    lines = [line.strip() for line in r.stdout.splitlines() if line.strip()]
-                    metadata = lines[-1].split() if lines else []
-                    proxy_ip = lines[0] if len(lines) >= 2 else ""
-                    code = metadata[0] if metadata else ""
+                    fields = r.stdout.strip().split("|")
+                    proxy_ip = fields[0].strip() if len(fields) >= 3 else ""
+                    code = fields[1].strip() if len(fields) >= 3 else ""
                     result["http_code"] = code or None
-                    if len(metadata) > 1:
+                    if len(fields) >= 3:
                         try:
-                            result["latency_ms"] = round(float(metadata[1]) * 1000)
+                            result["latency_ms"] = round(float(fields[2].strip()) * 1000)
                         except ValueError:
                             pass
                     try:
@@ -158,8 +157,9 @@ def _run_one(target, direct_ip):
     return result
 
 
-def _worker(targets, direct_ip):
+def _worker(targets):
     try:
+        direct_ip = _direct_ip()
         with ThreadPoolExecutor(max_workers=3) as pool:
             futures = [pool.submit(_run_one, target, direct_ip) for target in targets]
             for future in as_completed(futures):
@@ -196,8 +196,9 @@ def start_checks():
                 _state["running"] = False
                 _state["error"] = "В подписке не найдены поддерживаемые VLESS/Hysteria outbounds"
             return get_checks()
-        direct_ip = _direct_ip()
-        threading.Thread(target=_worker, args=(targets, direct_ip), daemon=True,
+        if not CURL:
+            raise RuntimeError("curl не установлен")
+        threading.Thread(target=_worker, args=(targets,), daemon=True,
             name="xray-node-checks").start()
     except Exception as e:
         with _lock:
