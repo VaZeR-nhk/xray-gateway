@@ -21,7 +21,7 @@ die(){ echo -e "${RED}[ERROR]$NC $*" >&2; exit 1; }
 case "${VERSION_ID:-}" in 12|13) ;; *) die "Поддерживается Debian 12 или 13." ;; esac
 
 export DEBIAN_FRONTEND=noninteractive
-if ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+if ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1 || ! dpkg -s ca-certificates >/dev/null 2>&1; then
   log "Устанавливаю Git, curl и сертификаты"
   apt-get update
   apt-get install -y --no-install-recommends git curl ca-certificates
@@ -38,6 +38,8 @@ if [[ -d "$PROJECT_DIR/.git" ]]; then
   if ! git diff --quiet || ! git diff --cached --quiet; then
     die "В репозитории есть локальные изменения. Сначала сохраните их или отмените; автоматический reset запрещён."
   fi
+  CURRENT_BRANCH="$(git branch --show-current)"
+  [[ "$CURRENT_BRANCH" == "$BRANCH" ]] || die "Текущая ветка $CURRENT_BRANCH, ожидалась $BRANCH. Переключение автоматически не выполняется."
   log "Обновляю проект из origin/$BRANCH (файлы .env и data сохраняются)"
   git fetch origin "$BRANCH"
   git pull --ff-only origin "$BRANCH"
