@@ -13,6 +13,8 @@ cleanup(){
 }
 trap cleanup EXIT
 
+python3 tests/test_hwid_headers.py
+
 chmod 700 "$STATE"
 cat > "$ENVFILE" <<'EOF'
 SUBSCRIPTION_URL=https://example.invalid/subscription
