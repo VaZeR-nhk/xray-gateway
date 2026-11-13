@@ -82,7 +82,29 @@ class H(BaseHTTPRequestHandler):
             if path == "/api/profiles":
                 r = run([GATEWAY, "profiles"])
                 if r.returncode: raise RuntimeError(r.stdout)
-                self.reply(200, json.loads(r.stdout))
+                data = json.loads(r.stdout)
+                checks = get_checks()
+                successful = {}
+                for item in checks.get("results", []):
+                    if item.get("status") != "OK" or item.get("latency_ms") is None:
+                        continue
+                    index = item.get("profile_index")
+                    if not isinstance(index, int) or index < 0:
+                        continue
+                    current = successful.get(index)
+                    if current is None or item["latency_ms"] < current["latency_ms"]:
+                        successful[index] = {
+                            "tag": item.get("tag"),
+                            "protocol": item.get("protocol"),
+                            "address": item.get("address"),
+                            "port": item.get("port"),
+                            "latency_ms": item["latency_ms"],
+                        }
+                for index, profile in enumerate(data.get("profiles", [])):
+                    best = successful.get(index)
+                    profile["ping_ms"] = best["latency_ms"] if best else None
+                    profile["best_node"] = best
+                self.reply(200, data)
             elif path == "/api/status":
                 r = run(["supervisorctl", "status", "xray"])
                 state = json.loads(Path("/var/lib/xray-gateway/state.json").read_text()) if Path("/var/lib/xray-gateway/state.json").exists() else {}
