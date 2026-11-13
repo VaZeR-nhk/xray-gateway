@@ -13,7 +13,7 @@ RUN curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERS
     && rm -rf /tmp/xray /tmp/xray.zip
 COPY gateway/ /opt/xray-gateway/
 COPY docker/ /opt/xray-gateway/docker/
-RUN chmod 0755 /opt/xray-gateway/docker/entrypoint.sh /opt/xray-gateway/docker/update-loop.sh /opt/xray-gateway/xray-gateway && ln -s /opt/xray-gateway/xray-gateway /usr/local/sbin/xray-gateway && mkdir -p /etc/xray-gateway /var/log/supervisor
-VOLUME ["/etc/xray-gateway"]
+RUN chmod 0755 /opt/xray-gateway/docker/entrypoint.sh /opt/xray-gateway/docker/update-loop.sh /opt/xray-gateway/xray-gateway && ln -s /opt/xray-gateway/xray-gateway /usr/local/sbin/xray-gateway && mkdir -p /etc/xray-gateway /var/lib/xray-gateway /var/log/supervisor
+VOLUME ["/var/lib/xray-gateway"]
 EXPOSE 8080 10808 10809 12345
 ENTRYPOINT ["/opt/xray-gateway/docker/entrypoint.sh"]
