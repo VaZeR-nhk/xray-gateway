@@ -35,7 +35,7 @@ fi
 local_line="$(grep -nF 'fib daddr type local return' "$ROOT/host-network.sh" | cut -d: -f1)"
 ipv6_line="$(grep -nF 'meta nfproto ipv6 drop' "$ROOT/host-network.sh" | cut -d: -f1)"
 [[ -n "$local_line" && -n "$ipv6_line" && "$local_line" -lt "$ipv6_line" ]]
-grep -Fq 'tproxy to :$TPROXY_PORT' "$ROOT/host-network.sh"
+grep -Fq 'tproxy ip to :$TPROXY_PORT' "$ROOT/host-network.sh"
 # Existing packet-mark bits must survive; only the reserved project bit is ORed in.
 grep -Fq 'meta mark set meta mark | $MARK' "$ROOT/host-network.sh"
 grep -Fq 'fwmark "$MARK"/"$MARK_MASK"' "$ROOT/host-network.sh"
