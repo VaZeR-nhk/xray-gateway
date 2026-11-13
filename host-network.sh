@@ -243,7 +243,7 @@ table inet $TABLE {
     iifname "$LAN_IF" meta nfproto ipv6 drop
     iifname "$LAN_IF" ip daddr $LAN_CIDR return
     iifname "$LAN_IF" ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 } return
-    iifname "$LAN_IF" ip saddr $LAN_CIDR meta nfproto ipv4 meta l4proto { tcp, udp } tproxy to :$TPROXY_PORT meta mark set meta mark | $MARK accept
+    iifname "$LAN_IF" ip saddr $LAN_CIDR meta nfproto ipv4 meta l4proto { tcp, udp } tproxy ip to :$TPROXY_PORT meta mark set meta mark | $MARK accept
   }
 }
 NFT
