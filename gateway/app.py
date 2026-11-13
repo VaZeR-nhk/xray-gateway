@@ -72,10 +72,16 @@ class H(BaseHTTPRequestHandler):
         if path == "/":
             self.reply(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
             return
-        if path in ("/app.js", "/style.css"):
+        if path in ("/app.js", "/style.css", "/TwemojiCountryFlags.woff2"):
             f = STATIC / path.lstrip("/")
             if not f.is_file(): self.reply(404, {"error":"Not found"}); return
-            self.reply(200, f.read_bytes(), "application/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
+            if path.endswith(".woff2"):
+                ctype = "font/woff2"
+            elif path.endswith(".js"):
+                ctype = "application/javascript; charset=utf-8"
+            else:
+                ctype = "text/css; charset=utf-8"
+            self.reply(200, f.read_bytes(), ctype)
             return
         if not self.guard(): return
         try:

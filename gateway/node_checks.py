@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 """Isolated subscription-node checks. Never touches the active gateway config or service."""
 import copy
+import ipaddress
 import json
 import shutil
 import socket
@@ -56,7 +57,19 @@ def _free_port():
         return s.getsockname()[1]
 
 
-def _run_one(target):
+def _direct_ip():
+    r = subprocess.run([CURL, "--noproxy", "*", "--connect-timeout", "5",
+        "--max-time", "10", "--fail", "--silent", "--show-error",
+        "https://api.ipify.org?format=text"], text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=12)
+    if r.returncode:
+        raise RuntimeError("Не удалось определить внешний IP сервера: " + r.stderr.strip()[:200])
+    value = r.stdout.strip()
+    ipaddress.ip_address(value)
+    return value
+
+
+def _run_one(target, direct_ip):
     result = {k: target[k] for k in ("profile", "profile_index", "tag", "protocol", "address", "port")}
     result.update(status="FAIL", latency_ms=None, http_code=None, error=None)
     if not CURL:
@@ -102,14 +115,29 @@ def _run_one(target):
                 try:
                     r = subprocess.run([CURL, "--socks5-hostname", f"127.0.0.1:{port}",
                         "--connect-timeout", "5", "--max-time", "12", "--silent", "--show-error",
-                        "--output", "/dev/null", "--write-out", "%{http_code}",
-                        "http://www.gstatic.com/generate_204"], text=True,
+                        "--fail", "--write-out", "\\n%{http_code} %{time_starttransfer}",
+                        "https://api.ipify.org?format=text"], text=True,
                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=14)
-                    result["latency_ms"] = round((time.monotonic() - started) * 1000)
-                    code = r.stdout.strip()
+                    lines = [line.strip() for line in r.stdout.splitlines() if line.strip()]
+                    metadata = lines[-1].split() if lines else []
+                    proxy_ip = lines[0] if len(lines) >= 2 else ""
+                    code = metadata[0] if metadata else ""
                     result["http_code"] = code or None
-                    if r.returncode == 0 and code == "204":
-                        result["status"] = "OK"
+                    if len(metadata) > 1:
+                        try:
+                            result["latency_ms"] = round(float(metadata[1]) * 1000)
+                        except ValueError:
+                            pass
+                    try:
+                        ipaddress.ip_address(proxy_ip)
+                        valid_ip = True
+                    except ValueError:
+                        valid_ip = False
+                    if r.returncode == 0 and code == "200" and valid_ip:
+                        if proxy_ip != direct_ip:
+                            result["status"] = "OK"
+                        else:
+                            result["error"] = "IP выхода совпадает с IP сервера — прокси не подтверждён"
                     else:
                         result["error"] = f"curl exit={r.returncode}, HTTP={code or 'нет ответа'}" + (("; " + r.stderr.strip()[:200]) if r.stderr.strip() else "")
                 except subprocess.TimeoutExpired:
@@ -130,10 +158,10 @@ def _run_one(target):
     return result
 
 
-def _worker(targets):
+def _worker(targets, direct_ip):
     try:
         with ThreadPoolExecutor(max_workers=3) as pool:
-            futures = [pool.submit(_run_one, target) for target in targets]
+            futures = [pool.submit(_run_one, target, direct_ip) for target in targets]
             for future in as_completed(futures):
                 try:
                     item = future.result()
@@ -168,7 +196,8 @@ def start_checks():
                 _state["running"] = False
                 _state["error"] = "В подписке не найдены поддерживаемые VLESS/Hysteria outbounds"
             return get_checks()
-        threading.Thread(target=_worker, args=(targets,), daemon=True,
+        direct_ip = _direct_ip()
+        threading.Thread(target=_worker, args=(targets, direct_ip), daemon=True,
             name="xray-node-checks").start()
     except Exception as e:
         with _lock:
