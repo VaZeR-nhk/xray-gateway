@@ -189,11 +189,12 @@ docker compose config --quiet
 
 log "Собираю Docker-образ"
 docker compose build xray-gateway
-IMAGE_ID="$(docker compose images -q xray-gateway | head -n1)"
-[[ -n "$IMAGE_ID" ]] || die "Docker Compose не вернул ID собранного образа"
+IMAGE_REF="$(docker compose config --images | head -n1)"
+[[ -n "$IMAGE_REF" ]] || die "Docker Compose не вернул имя собранного образа"
+docker image inspect "$IMAGE_REF" >/dev/null 2>&1 || die "Собранный Docker-образ $IMAGE_REF не найден"
 
 log "Запускаю container smoke test до замены рабочего контейнера"
-bash tests/smoke.sh "$IMAGE_ID"
+bash tests/smoke.sh "$IMAGE_REF"
 
 log "Проверки пройдены. Разворачиваю проверенный образ"
 docker compose up -d --no-build
