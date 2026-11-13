@@ -87,92 +87,94 @@ done
 mkdir -p data
 chmod 700 data
 
-# Запрашиваем URL при каждом запуске установщика. Enter оставляет текущий URL.
+# Read legacy values only for one-time migration. New installs write directly to .env.
+declare -A OLD=()
+if [[ -f data/settings.conf ]]; then
+  while IFS='=' read -r key value; do
+    [[ -n "${key:-}" && "$key" != \#* ]] && OLD["$key"]="$value"
+  done < data/settings.conf
+fi
+if [[ -f data/web-auth ]]; then
+  IFS=: read -r OLD_WEB_USER OLD_WEB_PASS < data/web-auth || true
+fi
+
 echo
-if [[ -s data/settings.conf ]]; then
-  read -r -s -p "Remnawave subscription URL (HTTPS; Enter — оставить текущую): " SUB_URL; echo
-  if [[ -z "$SUB_URL" ]]; then
-    SUB_URL="$(sed -n 's/^SUBSCRIPTION_URL=//p' data/settings.conf | head -n1)"
-  fi
+if [[ -n "${OLD[SUBSCRIPTION_URL]:-}" ]]; then
+  read -r -s -p "Remnawave subscription URL (Enter — оставить текущую): " SUB_URL; echo
+  SUB_URL="${SUB_URL:-${OLD[SUBSCRIPTION_URL]}}"
 else
   read -r -s -p "Remnawave subscription URL (HTTPS): " SUB_URL; echo
 fi
-[[ "$SUB_URL" == https://* ]] || die "Нужен HTTPS URL подписки"
-[[ "$SUB_URL" != *[[:space:]]* ]] || die "URL не должен содержать пробелы или управляющие символы"
+[[ "$SUB_URL" == https://* && "$SUB_URL" != *[[:space:]]* ]] || die "Нужен HTTPS URL без пробелов"
+[[ "$SUB_URL" =~ ^https://[A-Za-z0-9._~:/?%+=\&-]+$ ]] || die "URL содержит неподдерживаемые символы"
 
-export XRAY_GATEWAY_SUBSCRIPTION_URL="$SUB_URL"
-python3 - <<'PYSETTINGS'
-import os, pathlib, tempfile
-p=pathlib.Path("data/settings.conf")
-value=os.environ["XRAY_GATEWAY_SUBSCRIPTION_URL"]
-lines=p.read_text().splitlines() if p.exists() else []
-out=[]; found=False
-for line in lines:
-    if line.startswith("SUBSCRIPTION_URL="):
-        out.append("SUBSCRIPTION_URL="+value); found=True
-    else:
-        out.append(line)
-if not found: out.insert(0,"SUBSCRIPTION_URL="+value)
-for key, default in (("USER_AGENT","Happ"),("ACTIVE_PROFILE","0"),("TPROXY_PORT","12345"),("GATEWAY_IP","0.0.0.0")):
-    if not any(x.startswith(key+"=") for x in out): out.append(key+"="+default)
-fd,tmp=tempfile.mkstemp(dir="data",prefix="settings.")
-with os.fdopen(fd,"w") as f:
-    f.write("\n".join(out)+"\n")
-os.chmod(tmp,0o600)
-os.replace(tmp,p)
-PYSETTINGS
-unset SUB_URL XRAY_GATEWAY_SUBSCRIPTION_URL
-if [[ ! -s data/web-auth ]]; then
+WEB_USER="${WEB_USERNAME:-${OLD[WEB_USERNAME]:-${OLD_WEB_USER:-admin}}}"
+WEB_PASS="${WEB_PASSWORD:-${OLD[WEB_PASSWORD]:-${OLD_WEB_PASS:-}}}"
+if [[ -z "$WEB_PASS" ]]; then
   echo
-  while true; do
-    read -r -p "Web UI username [admin]: " WEB_USER
-    WEB_USER="${WEB_USER:-admin}"
-    if [[ "$WEB_USER" != *:* && -n "$WEB_USER" ]]; then
-      break
-    fi
-    warn "Имя пользователя не должно быть пустым или содержать двоеточие. Повтори ввод."
-  done
-
-  read -r -p "Сгенерировать пароль автоматически? [y/N]: " GENERATE_PASSWORD
+  read -r -p "Web UI username [$WEB_USER]: " INPUT_USER
+  WEB_USER="${INPUT_USER:-$WEB_USER}"
+  [[ "$WEB_USER" =~ ^[A-Za-z0-9._-]+$ ]] || die "Недопустимый логин"
+  read -r -p "Сгенерировать пароль автоматически? [Y/n]: " GENERATE_PASSWORD
   case "${GENERATE_PASSWORD,,}" in
-    y|yes|д|да)
-      # 24 случайных байта в hex: 48 символов, безопасных для basic-auth.
-      WEB_PASS="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
-      [[ "${#WEB_PASS}" -eq 48 ]] || die "Не удалось сгенерировать пароль"
-      log "Сгенерирован случайный пароль длиной 48 символов"
-      ;;
-    *)
+    n|no|н|нет)
       while true; do
-        # Пароль вводится скрыто.
         read -r -s -p "Web UI password (min 12 chars): " WEB_PASS; echo
-        if [[ "${#WEB_PASS}" -lt 12 ]]; then
-          warn "Пароль должен содержать не менее 12 символов. Повтори ввод."
-          continue
-        fi
-
         read -r -s -p "Повтори пароль: " WEB_PASS_CONFIRM; echo
-        if [[ "$WEB_PASS" != "$WEB_PASS_CONFIRM" ]]; then
-          warn "Пароли не совпадают. Начни ввод пароля заново."
-          continue
-        fi
+        [[ "$WEB_PASS" == "$WEB_PASS_CONFIRM" ]] || { warn "Пароли не совпадают"; continue; }
         break
       done
       ;;
+    *)
+      WEB_PASS="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+      ;;
   esac
-
-  printf '%s:%s\n' "$WEB_USER" "$WEB_PASS" > data/web-auth
-  chmod 600 data/web-auth
-  unset WEB_PASS_CONFIRM
-else
-  log "Найден data/web-auth — сохраняю существующую авторизацию панели"
 fi
+[[ "$WEB_USER" =~ ^[A-Za-z0-9._-]+$ ]] || die "Недопустимый логин"
+[[ "${#WEB_PASS}" -ge 12 && "$WEB_PASS" =~ ^[A-Za-z0-9._~!@%+=,-]+$ ]] || die "Пароль должен быть не короче 12 символов и содержать только A-Z a-z 0-9 . _ ~ ! @ % + = , -"
 
-if [[ ! -f .env ]]; then
-  printf 'XRAY_VERSION=26.11.9\n' > .env
-fi
+export XRAY_GATEWAY_SUBSCRIPTION_URL="$SUB_URL" XRAY_GATEWAY_WEB_USERNAME="$WEB_USER" XRAY_GATEWAY_WEB_PASSWORD="$WEB_PASS"
+export XRAY_GATEWAY_USER_AGENT="${OLD[USER_AGENT]:-Happ}"
+export XRAY_GATEWAY_ACTIVE_PROFILE="${OLD[ACTIVE_PROFILE]:-0}"
+export XRAY_GATEWAY_TPROXY_PORT="${OLD[TPROXY_PORT]:-12345}"
+export XRAY_GATEWAY_GATEWAY_IP="${OLD[GATEWAY_IP]:-0.0.0.0}"
+export XRAY_GATEWAY_ENABLE_TPROXY="${OLD[ENABLE_TPROXY]:-false}"
+export XRAY_GATEWAY_XRAY_VERSION="${OLD[XRAY_VERSION]:-26.11.9}"
+export XRAY_GATEWAY_SESSION_SECRET="${OLD[SESSION_SECRET]:-}"
 
-log "Переношу все секреты и параметры в единый .env"
-bash configure-env.sh
+python3 - <<'PYENV'
+import os, pathlib, secrets, re
+p = pathlib.Path(".env")
+values = {
+    "XRAY_VERSION": os.environ["XRAY_GATEWAY_XRAY_VERSION"],
+    "SUBSCRIPTION_URL": os.environ["XRAY_GATEWAY_SUBSCRIPTION_URL"],
+    "USER_AGENT": os.environ["XRAY_GATEWAY_USER_AGENT"],
+    "ACTIVE_PROFILE": os.environ["XRAY_GATEWAY_ACTIVE_PROFILE"],
+    "TPROXY_PORT": os.environ["XRAY_GATEWAY_TPROXY_PORT"],
+    "GATEWAY_IP": os.environ["XRAY_GATEWAY_GATEWAY_IP"],
+    "ENABLE_TPROXY": os.environ["XRAY_GATEWAY_ENABLE_TPROXY"],
+    "WEB_USERNAME": os.environ["XRAY_GATEWAY_WEB_USERNAME"],
+    "WEB_PASSWORD": os.environ["XRAY_GATEWAY_WEB_PASSWORD"],
+    "SESSION_SECRET": os.environ["XRAY_GATEWAY_SESSION_SECRET"] or secrets.token_hex(32),
+}
+if not re.fullmatch(r"[0-9a-fA-F]{64}", values["SESSION_SECRET"]):
+    raise SystemExit("SESSION_SECRET должен содержать 64 hex-символа")
+if values["ENABLE_TPROXY"].lower() not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
+    raise SystemExit("Некорректный ENABLE_TPROXY")
+if not re.fullmatch(r"https://[A-Za-z0-9._~:/?%+=&-]+", values["SUBSCRIPTION_URL"]):
+    raise SystemExit("SUBSCRIPTION_URL содержит неподдерживаемые символы")
+if not re.fullmatch(r"[A-Za-z0-9._-]+", values["WEB_USERNAME"]):
+    raise SystemExit("Недопустимый WEB_USERNAME")
+if not re.fullmatch(r"[A-Za-z0-9._~!@%+=,-]{12,}", values["WEB_PASSWORD"]):
+    raise SystemExit("Недопустимый WEB_PASSWORD")
+tmp = p.with_name(".env.new")
+tmp.write_text("".join(f"{k}={v}\\n" for k, v in values.items()))
+os.chmod(tmp, 0o600)
+os.replace(tmp, p)
+PYENV
+chmod 600 .env
+rm -f data/settings.conf data/web-auth
+unset SUB_URL WEB_PASS WEB_PASS_CONFIRM XRAY_GATEWAY_SUBSCRIPTION_URL XRAY_GATEWAY_WEB_USERNAME XRAY_GATEWAY_WEB_PASSWORD
 
 log "Проверяю конфигурацию Docker Compose"
 docker compose config --quiet
