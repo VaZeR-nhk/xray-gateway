@@ -13,6 +13,15 @@ log(){ echo -e "${GREEN}[+]$NC $*"; }
 warn(){ echo -e "${YELLOW}[!]$NC $*" >&2; }
 die(){ echo -e "${RED}[ERROR]$NC $*" >&2; exit 1; }
 
+AUTH_DIR=""
+cleanup_auth() {
+  if [[ -n "${AUTH_DIR:-}" && -d "$AUTH_DIR" ]]; then
+    rm -rf -- "$AUTH_DIR"
+  fi
+  unset GITHUB_TOKEN GIT_ASKPASS GIT_TERMINAL_PROMPT
+}
+trap cleanup_auth EXIT
+
 [[ "$(id -u)" -eq 0 ]] || die "Запусти команду от root."
 [[ -r /etc/os-release ]] || die "Не найден /etc/os-release"
 # shellcheck disable=SC1091
@@ -20,12 +29,33 @@ die(){ echo -e "${RED}[ERROR]$NC $*" >&2; exit 1; }
 [[ "${ID:-}" == "debian" ]] || die "Поддерживается Debian 12/13. Обнаружено: ${PRETTY_NAME:-unknown}"
 case "${VERSION_ID:-}" in 12|13) ;; *) die "Поддерживается Debian 12 или 13." ;; esac
 
+if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+  read -rsp "GitHub token (ввод скрыт): " GITHUB_TOKEN
+  echo
+fi
+[[ -n "${GITHUB_TOKEN:-}" ]] || die "GitHub token не задан."
+
 export DEBIAN_FRONTEND=noninteractive
 if ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1 || ! dpkg -s ca-certificates >/dev/null 2>&1; then
   log "Устанавливаю Git, curl и сертификаты"
   apt-get update
   apt-get install -y --no-install-recommends git curl ca-certificates
 fi
+
+# Git получает токен через временный askpass-helper. Секрет не попадает
+# в origin, git config, аргументы git или файлы проекта.
+AUTH_DIR="$(mktemp -d /run/xray-gateway-auth.XXXXXX)"
+chmod 700 "$AUTH_DIR"
+cat >"$AUTH_DIR/askpass" <<'ASKPASS'
+#!/bin/sh
+case "$1" in
+  *Username*) printf '%s\n' "x-access-token" ;;
+  *)          printf '%s\n' "$GITHUB_TOKEN" ;;
+esac
+ASKPASS
+chmod 700 "$AUTH_DIR/askpass"
+export GIT_ASKPASS="$AUTH_DIR/askpass"
+export GIT_TERMINAL_PROMPT=0
 
 mkdir -p /opt
 if [[ -d "$PROJECT_DIR/.git" ]]; then
@@ -46,11 +76,16 @@ if [[ -d "$PROJECT_DIR/.git" ]]; then
 elif [[ -e "$PROJECT_DIR" ]]; then
   die "$PROJECT_DIR уже существует, но это не Git-клон проекта. Ничего не удаляю. Переименуй каталог вручную после резервного копирования."
 else
-  log "Клонирую проект в $PROJECT_DIR"
+  log "Клонирую приватный проект в $PROJECT_DIR"
   git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$PROJECT_DIR"
 fi
+
+# Git-аутентификация больше не нужна: удаляем временный helper и токен
+# до запуска установщика.
+cleanup_auth
+trap - EXIT
 
 cd "$PROJECT_DIR"
 [[ -f install.sh && -f docker-compose.yml && -f Dockerfile ]] || die "В каталоге проекта отсутствуют обязательные файлы."
 chmod +x install.sh bootstrap.sh tests/smoke.sh
-exec bash ./install.sh
+bash ./install.sh
