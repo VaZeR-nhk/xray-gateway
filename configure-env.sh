@@ -16,20 +16,6 @@ if env.exists():
             key, value = line.split("=", 1)
             values[key.strip()] = value.strip()
 
-legacy = root / "data/settings.conf"
-if legacy.exists():
-    for line in legacy.read_text().splitlines():
-        if line and not line.lstrip().startswith("#") and "=" in line:
-            key, value = line.split("=", 1)
-            values.setdefault(key.strip(), value.strip())
-
-auth = root / "data/web-auth"
-if auth.exists():
-    user, sep, password = auth.read_text().strip().partition(":")
-    if sep:
-        values.setdefault("WEB_USERNAME", user)
-        values.setdefault("WEB_PASSWORD", password)
-
 defaults = {
     "XRAY_VERSION": "26.11.9",
     "USER_AGENT": "Happ",
@@ -69,9 +55,5 @@ tmp = env.with_name(".env.new")
 tmp.write_text("".join(f"{key}={values[key]}\n" for key in order))
 os.chmod(tmp, 0o600)
 os.replace(tmp, env)
-if auth.exists():
-    auth.unlink()
-if legacy.exists():
-    legacy.unlink()
 PY
 chmod 600 .env
