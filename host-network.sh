@@ -27,6 +27,73 @@ normalize_port(){
   printf '%s\n' "$value"
 }
 
+valid_rp_filter(){
+  [[ "${1:-}" =~ ^[012]$ ]]
+}
+
+read_rp_filter(){
+  local key="$1" value
+  value="$(sysctl -n "$key" 2>/dev/null)" || die "Не удалось прочитать $key"
+  valid_rp_filter "$value" || die "Неожиданное значение $key=$value (ожидалось 0, 1 или 2)"
+  printf '%s\n' "$value"
+}
+
+save_rp_filter_state(){
+  local all_rpf default_rpf if_rpf tmp path iface value index=0
+  all_rpf="$(read_rp_filter net.ipv4.conf.all.rp_filter)"
+  default_rpf="$(read_rp_filter net.ipv4.conf.default.rp_filter)"
+  if_rpf="$(read_rp_filter "net.ipv4.conf.$LAN_IF.rp_filter")"
+  tmp="$STATE.tmp"
+  umask 077
+  {
+    printf 'STATE_VERSION=1\nALL_RPF=%q\nDEFAULT_RPF=%q\nIF_RPF=%q\nLAN_IF=%q\n' \
+      "$all_rpf" "$default_rpf" "$if_rpf" "$LAN_IF"
+    for path in /proc/sys/net/ipv4/conf/*/rp_filter; do
+      [[ -r "$path" ]] || continue
+      iface="${path%/rp_filter}"; iface="${iface##*/}"
+      [[ "$iface" != "all" && "$iface" != "default" ]] || continue
+      value="$(cat "$path")"
+      valid_rp_filter "$value" || die "Неожиданное значение rp_filter для интерфейса $iface: $value"
+      printf 'IFACE_%d=%q\nIFACE_RPF_%d=%q\n' "$index" "$iface" "$index" "$value"
+      index=$((index+1))
+    done
+    printf 'IFACE_COUNT=%q\n' "$index"
+  } > "$tmp"
+  chmod 600 "$tmp"
+  mv -f "$tmp" "$STATE"
+  log "Сохранён rp_filter: all=$all_rpf, default=$default_rpf, $LAN_IF=$if_rpf; интерфейсов=$index"
+  log "default не изменяется. Эффективный режим остальных интерфейсов будет сохранён."
+}
+
+restore_rp_filter_state(){
+  [[ -r "$STATE" ]] || return 0
+  # shellcheck disable=SC1090
+  source "$STATE"
+  [[ "${STATE_VERSION:-}" == "1" ]] || { log "Неизвестная версия состояния sysctl"; return 1; }
+  valid_rp_filter "${ALL_RPF:-}" || { log "Повреждено ALL_RPF"; return 1; }
+  valid_rp_filter "${DEFAULT_RPF:-}" || { log "Повреждено DEFAULT_RPF"; return 1; }
+  valid_rp_filter "${IF_RPF:-}" || { log "Повреждено IF_RPF"; return 1; }
+  [[ "${LAN_IF:-}" =~ ^[a-zA-Z0-9_.:-]+$ ]] || { log "Повреждено LAN_IF"; return 1; }
+  [[ "${IFACE_COUNT:-}" =~ ^[0-9]+$ ]] || { log "Поврежден IFACE_COUNT"; return 1; }
+  local i name_var value_var iface value
+  # Restore per-interface values first, then the global all value.
+  for ((i=0; i<IFACE_COUNT; i++)); do
+    name_var="IFACE_$i"; value_var="IFACE_RPF_$i"
+    iface="${!name_var:-}"; value="${!value_var:-}"
+    [[ "$iface" =~ ^[a-zA-Z0-9_.:-]+$ ]] || { log "Повреждено имя интерфейса в state"; return 1; }
+    valid_rp_filter "$value" || { log "Поврежден rp_filter в state для $iface"; return 1; }
+    if [[ -e "/proc/sys/net/ipv4/conf/$iface/rp_filter" ]]; then
+      sysctl -q -w "net.ipv4.conf.$iface.rp_filter=$value" || { log "Не удалось восстановить rp_filter для $iface"; return 1; }
+    else
+      log "Интерфейс $iface исчез; его sysctl пропущен."
+    fi
+  done
+  sysctl -q -w "net.ipv4.conf.all.rp_filter=$ALL_RPF" || { log "Не удалось восстановить net.ipv4.conf.all.rp_filter"; return 1; }
+  rm -f "$STATE"
+  log "Исходные значения rp_filter восстановлены; default не изменялся."
+}
+
+
 route_table_rule_exists(){
   local rules="${1:-}"
   grep -Eq "(lookup|table)[[:space:]]+${ROUTE_TABLE}([[:space:]]|$)" <<<"$rules"
@@ -62,11 +129,11 @@ apply_rules(){
   done
   [[ "$ready" == yes ]] || die "На порту $TPROXY_PORT нет listener Xray. Правила не установлены."
 
-  local ALL_RPF IF_RPF
-  ALL_RPF="$(sysctl -n net.ipv4.conf.all.rp_filter)"
-  IF_RPF="$(sysctl -n "net.ipv4.conf.$LAN_IF.rp_filter")"
-  printf 'ALL_RPF=%q\nIF_RPF=%q\nLAN_IF=%q\n' "$ALL_RPF" "$IF_RPF" "$LAN_IF" > "$STATE"
-  chmod 600 "$STATE"
+  [[ ! -e "$STATE" ]] || die "Найден файл состояния $STATE; сначала проверьте предыдущую установку/откат."
+  save_rp_filter_state
+  # Load the snapshot into this shell for the reversible per-interface adjustments.
+  # shellcheck disable=SC1090
+  source "$STATE"
 
   rollback_on_error(){
     local rc="${1:-1}"
@@ -75,9 +142,7 @@ apply_rules(){
     nft delete table inet "$TABLE" >/dev/null 2>&1 || true
     ip -4 rule del priority "$RULE_PREF" fwmark "$MARK"/"$MARK_MASK" lookup "$ROUTE_TABLE" >/dev/null 2>&1 || true
     ip -4 route del local 0.0.0.0/0 dev lo table "$ROUTE_TABLE" >/dev/null 2>&1 || true
-    sysctl -q -w "net.ipv4.conf.all.rp_filter=$ALL_RPF" || true
-    sysctl -q -w "net.ipv4.conf.$LAN_IF.rp_filter=$IF_RPF" || true
-    rm -f "$STATE"
+    restore_rp_filter_state || log "ВНИМАНИЕ: не удалось восстановить rp_filter; состояние оставлено в $STATE"
     return 0
   }
   trap 'rc=$?; rollback_on_error "$rc"; exit "$rc"' ERR
@@ -85,6 +150,16 @@ apply_rules(){
   trap 'rollback_on_error 143; exit 143' TERM
   trap 'rollback_on_error 129; exit 129' HUP
 
+  # Preserve the effective rp_filter mode on every non-LAN interface:
+  # lowering conf.all changes the max(conf/all, conf/interface) calculation.
+  local i name_var value_var iface value
+  for ((i=0; i<IFACE_COUNT; i++)); do
+    name_var="IFACE_$i"; value_var="IFACE_RPF_$i"
+    iface="${!name_var}"; value="${!value_var}"
+    if [[ "$iface" != "$LAN_IF" && "$iface" != "all" && "$iface" != "default" ]] && (( value < ALL_RPF )); then
+      sysctl -q -w "net.ipv4.conf.$iface.rp_filter=$ALL_RPF"
+    fi
+  done
   sysctl -q -w net.ipv4.conf.all.rp_filter=0
   sysctl -q -w "net.ipv4.conf.$LAN_IF.rp_filter=0"
   ip -4 route add local 0.0.0.0/0 dev lo table "$ROUTE_TABLE"
@@ -116,10 +191,8 @@ remove_rules(){
     nft delete table inet "$TABLE" >/dev/null 2>&1 || true
     ip -4 rule del priority "$RULE_PREF" fwmark "$MARK"/"$MARK_MASK" lookup "$ROUTE_TABLE" >/dev/null 2>&1 || true
     ip -4 route del local 0.0.0.0/0 dev lo table "$ROUTE_TABLE" >/dev/null 2>&1 || true
-    sysctl -q -w "net.ipv4.conf.all.rp_filter=$ALL_RPF" || true
-    sysctl -q -w "net.ipv4.conf.$LAN_IF.rp_filter=$IF_RPF" || true
-    rm -f "$STATE"
-    log "Правила проекта удалены, rp_filter восстановлен."
+    restore_rp_filter_state || die "Не удалось восстановить rp_filter; состояние сохранено в $STATE"
+    log "Правила проекта удалены; исходный rp_filter восстановлен."
   else
     log "Состояние не найдено; удалять нечего."
   fi
@@ -214,15 +287,86 @@ EOF
   log "Проверка: nft list table inet $TABLE; ip rule show; ip route show table $ROUTE_TABLE"
 }
 
+diagnose(){
+  need_root
+  have ip; have ss; have nft; have sysctl
+  local project_env="$(cd -- "$(dirname -- "$0")" && pwd)/.env"
+  local lan_if="${1:-}" lan_cidr="${2:-}" gateway_ip="${3:-}" tproxy_port="${4:-}"
+  if [[ -z "$lan_if" && -f "$project_env" ]]; then
+    lan_if="$(awk -F= '$1=="LAN_IF"{print $2}' "$project_env" | tail -n1)"
+    lan_cidr="$(awk -F= '$1=="LAN_CIDR"{print $2}' "$project_env" | tail -n1)"
+    gateway_ip="$(awk -F= '$1=="GATEWAY_IP"{print $2}' "$project_env" | tail -n1)"
+    tproxy_port="$(awk -F= '$1=="TPROXY_PORT"{print $2}' "$project_env" | tail -n1)"
+  fi
+  tproxy_port="$(normalize_port "${tproxy_port:-$DEFAULT_TPROXY_PORT}")" || die "Некорректный TPROXY_PORT"
+  [[ -n "$lan_if" ]] || die "LAN_IF не задан; укажите интерфейс или заполните .env"
+  ip link show dev "$lan_if" >/dev/null 2>&1 || die "Интерфейс $lan_if не существует"
+  echo "===== Xray Gateway host-network preflight (read-only) ====="
+  echo "LAN_IF=$lan_if LAN_CIDR=${lan_cidr:-unset} GATEWAY_IP=${gateway_ip:-unset} TPROXY_PORT=$tproxy_port"
+  echo
+  echo "[rp_filter] (0=off, 1=strict, 2=loose; effective=max(all, interface)]"
+  local key value path iface
+  for key in all default "$lan_if"; do
+    value="$(sysctl -n "net.ipv4.conf.$key.rp_filter" 2>/dev/null || echo unavailable)"
+    printf '  %-8s %s\n' "$key" "$value"
+    [[ "$value" =~ ^[012]$ ]] || log "WARN: не удалось прочитать/проверить rp_filter для $key"
+  done
+  echo "  Все текущие интерфейсы:"
+  for path in /proc/sys/net/ipv4/conf/*/rp_filter; do
+    [[ -r "$path" ]] || continue
+    iface="${path%/rp_filter}"; iface="${iface##*/}"
+    printf '    %-16s %s\n' "$iface" "$(cat "$path")"
+  done
+  echo
+  echo "[Forwarding — только аудит, скрипт не меняет эти значения]"
+  for key in net.ipv4.ip_forward net.ipv6.conf.all.forwarding net.ipv6.conf.default.forwarding net.ipv6.conf.all.disable_ipv6; do
+    value="$(sysctl -n "$key" 2>/dev/null || echo unavailable)"
+    printf '  %-42s %s\n' "$key" "$value"
+  done
+  echo "  IPv4 forwarding для локального TPROXY-пути не требуется."
+  echo
+  echo "[Policy routing / nftables conflicts]"
+  if ip -4 rule show | grep -Eq "^[[:space:]]*$RULE_PREF:"; then
+    echo "  CONFLICT: priority $RULE_PREF уже занят"
+  else
+    echo "  OK: priority $RULE_PREF свободен"
+  fi
+  if route_table_rule_exists "$(ip -4 rule show)"; then
+    echo "  CONFLICT: таблица $ROUTE_TABLE уже используется ip rule"
+  elif ip -4 route show table "$ROUTE_TABLE" | grep -q .; then
+    echo "  CONFLICT: таблица $ROUTE_TABLE уже содержит маршруты"
+  else
+    echo "  OK: таблица $ROUTE_TABLE свободна"
+  fi
+  if nft list table inet "$TABLE" >/dev/null 2>&1; then
+    echo "  CONFLICT: nft table inet $TABLE уже существует"
+  else
+    echo "  OK: nft table inet $TABLE отсутствует"
+  fi
+  echo
+  echo "[Xray listener]"
+  if ss -H -lnutp 2>/dev/null | grep -Eq "(^|[[:space:]])(${gateway_ip:-0\\.0\\.0\\.0}|0\\.0\\.0\\.0|\\*):${tproxy_port}([[:space:]]|$)"; then
+    ss -H -lnutp 2>/dev/null | grep -E ":${tproxy_port}([[:space:]]|$)" || true
+  else
+    echo "  WARN: listener на ожидаемом адресе/порту не обнаружен"
+  fi
+  echo
+  echo "[IPv6]"
+  echo "  IPv6 на самом шлюзе не отключается."
+  echo "  После установки IPv6-транзит с LAN будет блокироваться правилом nftables (fail-closed)."
+  echo "  IPv4/IPv6 forwarding sysctl не меняются."
+}
+
 remove_installation(){
   need_root
   if systemctl is-active --quiet "$NAME-host-network.service"; then
-    systemctl stop "$NAME-host-network.service" || true
+    systemctl stop "$NAME-host-network.service" || die "Не удалось остановить службу и восстановить sysctl; файлы состояния сохранены."
   else
     remove_rules
   fi
+  [[ ! -e "$STATE" ]] || die "Файл состояния $STATE ещё существует. Не удаляю его и файлы восстановления."
   systemctl disable "$NAME-host-network.service" >/dev/null 2>&1 || true
-  rm -f "$UNIT" "$CONFIG" "$STATE"
+  rm -f "$UNIT" "$CONFIG"
   systemctl daemon-reload
   rm -f "$INSTALL_PATH"
   log "Автозапуск TPROXY удалён."
@@ -231,10 +375,11 @@ remove_installation(){
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   need_root
   case "${1:-}" in
-    install) shift; install_service "${1:-}" "${2:-}" ;;
+    install) shift; install_service "${1:-}" "${2:-}" "${3:-}" ;;
+    check) shift; diagnose "${1:-}" "${2:-}" "${3:-}" "${4:-}" ;;
     apply) apply_rules ;;
     remove) remove_rules ;;
     uninstall) remove_installation ;;
-    *) echo "Usage: bash host-network.sh install [LAN_IF] [LAN_CIDR] | apply | remove | uninstall"; exit 2 ;;
+    *) echo "Usage: bash host-network.sh check [LAN_IF] [LAN_CIDR] [GATEWAY_IP] [TPROXY_PORT] | install [LAN_IF] [LAN_CIDR] [GATEWAY_IP] | apply | remove | uninstall"; exit 2 ;;
   esac
 fi

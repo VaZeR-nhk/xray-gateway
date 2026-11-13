@@ -50,7 +50,7 @@ log "Система: ${PRETTY_NAME}; архитектура: $ARCH"
 log "Обновляю индексы APT и устанавливаю системные зависимости"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl gnupg git jq iproute2 nftables python3
+apt-get install -y --no-install-recommends ca-certificates curl gnupg git jq iproute2 nftables procps python3
 
 command -v curl >/dev/null 2>&1 || die "Не удалось установить curl"
 curl --version | head -n 1
