@@ -11,7 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-SUBSCRIPTION = Path("/etc/xray-gateway/subscription.json")
+SUBSCRIPTION = Path("/var/lib/xray-gateway/subscription.json")
 XRAY = "/usr/local/bin/xray"
 CURL = shutil.which("curl")
 _lock = threading.Lock()
