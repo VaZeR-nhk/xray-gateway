@@ -106,7 +106,9 @@ def build_routing_view(config):
             elif isinstance(server, dict):
                 safe_dns["servers"].append(_selected(server, DNS_SERVER_FIELDS))
 
-    safe_outbounds = [item for item in (_outbound(x) for x in outbounds[:200] if isinstance(outbounds, list)) if item]
+    safe_outbounds = []
+    if isinstance(outbounds, list):
+        safe_outbounds = [item for item in (_outbound(x) for x in outbounds[:200]) if item]
     safe_inbounds = []
     if isinstance(inbounds, list):
         for item in inbounds[:200]:
