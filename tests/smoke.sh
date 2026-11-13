@@ -57,6 +57,27 @@ docker run -d --name "$NAME" --network host \
 docker exec "$NAME" test -s /usr/local/bin/geosite.dat
 docker exec "$NAME" test -s /usr/local/bin/geoip.dat
 
+# Exercise the real Xray parser against the generated transparent inbound.
+docker exec "$NAME" python3 - <<'PY'
+import importlib.machinery
+import importlib.util
+import json
+
+path = "/opt/xray-gateway/xray-gateway"
+loader = importlib.machinery.SourceFileLoader("xray_gateway_entrypoint", path)
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+profile = json.load(open("/var/lib/xray-gateway/subscription.json", encoding="utf-8"))[0]
+config = module.build(profile, {
+    "ENABLE_TPROXY": "true",
+    "TPROXY_PORT": "12345",
+    "GATEWAY_IP": "0.0.0.0",
+})
+open("/tmp/xray-gateway-tproxy-ci.json", "wb").write(config)
+PY
+docker exec "$NAME" /usr/local/bin/xray run -test -config /tmp/xray-gateway-tproxy-ci.json
+
 ready=0
 for _ in $(seq 1 30); do
   if curl -fsS --max-time 2 -c "$COOKIE" -H "Content-Type: application/json" -d '{"username":"ci","password":"ci-password-long"}' http://127.0.0.1:18080/api/auth/login >/dev/null 2>&1 && curl -fsS --max-time 2 -b "$COOKIE" http://127.0.0.1:18080/api/profiles > "$OUT" 2>/dev/null; then
