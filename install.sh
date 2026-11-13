@@ -17,6 +17,13 @@ log()  { echo -e "${GREEN}[+]$NC $*"; }
 warn() { echo -e "${YELLOW}[!]$NC $*" >&2; }
 die()  { echo -e "${RED}[ERROR]$NC $*" >&2; exit 1; }
 
+PREFLIGHT_STATE=""
+cleanup_preflight() {
+  if [[ -n "$PREFLIGHT_STATE" && -d "$PREFLIGHT_STATE" ]]; then
+    rm -rf "$PREFLIGHT_STATE"
+  fi
+}
+trap cleanup_preflight EXIT
 trap 'rc=$?; echo -e "\n\033[0;31m[ERROR]\033[0m Ошибка на строке ${LINENO} (код ${rc})." >&2; exit "$rc"' ERR
 
 [[ "$(id -u)" -eq 0 ]] || die "Запусти скрипт от root: bash install.sh"
@@ -196,15 +203,48 @@ docker image inspect "$IMAGE_REF" >/dev/null 2>&1 || die "Собранный Doc
 log "Запускаю container smoke test до замены рабочего контейнера"
 bash tests/smoke.sh "$IMAGE_REF"
 
-log "Проверки пройдены. Разворачиваю проверенный образ"
+log "Проверяю реальную подписку и активный профиль до замены рабочего контейнера"
+# Проверка выполняется во временной копии state: HWID и выбранный профиль
+# сохраняются, но тестовая загрузка не меняет рабочие файлы state/.
+if [[ ! -s state/hwid ]]; then
+  python3 -c 'import uuid; print(uuid.uuid4())' > state/hwid
+  chmod 600 state/hwid
+fi
+PREFLIGHT_STATE="$(mktemp -d)"
+chmod 700 "$PREFLIGHT_STATE"
+cp -a state/. "$PREFLIGHT_STATE/"
+docker run --rm --network host \
+  --env-file "$SCRIPT_DIR/.env" \
+  -v "$PREFLIGHT_STATE:/var/lib/xray-gateway" \
+  -v "$SCRIPT_DIR/.env:/etc/xray-gateway/.env:ro" \
+  --entrypoint /usr/local/sbin/xray-gateway \
+  "$IMAGE_REF" update
+
+log "Реальная подписка и активный профиль прошли проверку"
+log "Разворачиваю проверенный образ"
 docker compose up -d --no-build
 
-log "Проверяю состояние контейнера"
-sleep 3
+log "Проверяю запуск контейнера и служб"
+CONTAINER_ID="$(docker compose ps -q xray-gateway)"
+[[ -n "$CONTAINER_ID" ]] || die "Docker Compose не создал контейнер xray-gateway"
+SERVICES_READY=0
+for _ in $(seq 1 30); do
+  CONTAINER_STATUS="$(docker inspect --format '{{.State.Status}}' "$CONTAINER_ID" 2>/dev/null || true)"
+  if [[ "$CONTAINER_STATUS" == "running" ]]; then
+    SERVICE_STATUS="$(docker exec "$CONTAINER_ID" supervisorctl status xray web 2>/dev/null || true)"
+    if grep -qE '^xray[[:space:]]+RUNNING' <<<"$SERVICE_STATUS" && grep -qE '^web[[:space:]]+RUNNING' <<<"$SERVICE_STATUS"; then
+      SERVICES_READY=1
+      break
+    fi
+  elif [[ "$CONTAINER_STATUS" == "restarting" || "$CONTAINER_STATUS" == "exited" || "$CONTAINER_STATUS" == "dead" ]]; then
+    break
+  fi
+  sleep 1
+done
 docker compose ps
-if ! docker compose ps --status running --services | grep -qx 'xray-gateway'; then
-  docker compose logs --tail=100 xray-gateway || true
-  die "Контейнер xray-gateway не перешёл в состояние running"
+if [[ "$SERVICES_READY" != "1" ]]; then
+  docker compose logs --tail=150 xray-gateway || true
+  die "Контейнер или службы Xray/Web UI не перешли в RUNNING. Установка не завершена."
 fi
 
 SERVER_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')
