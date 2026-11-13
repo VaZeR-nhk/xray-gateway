@@ -173,7 +173,7 @@ if not re.fullmatch(r"[A-Za-z0-9._-]+", values["WEB_USERNAME"]):
 if not re.fullmatch(r"[A-Za-z0-9._~!@%+=,-]{12,}", values["WEB_PASSWORD"]):
     raise SystemExit("Недопустимый WEB_PASSWORD")
 tmp = p.with_name(".env.new")
-tmp.write_text("".join(f"{k}={v}\\n" for k, v in values.items()))
+tmp.write_text("".join(f"{k}={v}\n" for k, v in values.items()))
 os.chmod(tmp, 0o600)
 os.replace(tmp, p)
 PYENV
