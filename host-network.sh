@@ -115,8 +115,15 @@ if not addresses:
 if not any(address in network for address in addresses):
     raise SystemExit("LAN CIDR не совпадает ни с одним IPv4-адресом выбранного интерфейса")
 PY
+  local tproxy_port="$DEFAULT_TPROXY_PORT"
+  local project_env="$(cd -- "$(dirname -- "$0")" && pwd)/.env"
+  if [[ -f "$project_env" ]]; then
+    tproxy_port="$(awk -F= '$1 == "TPROXY_PORT" {sub(/^[^=]*=/, ""); value=$0} END {if (value != "") print value}' "$project_env")"
+    tproxy_port="${tproxy_port:-$DEFAULT_TPROXY_PORT}"
+  fi
+  [[ "$tproxy_port" =~ ^[0-9]+$ ]] && (( tproxy_port >= 1 && tproxy_port <= 65535 )) || die "Некорректный TPROXY_PORT в .env"
   if [[ -e "$CONFIG" ]]; then die "$CONFIG уже существует; сначала проверьте текущую конфигурацию"; fi
-  printf 'LAN_IF=%q\nLAN_CIDR=%q\n' "$lan_if" "$lan_cidr" > "$CONFIG"
+  printf 'LAN_IF=%q\\nLAN_CIDR=%q\\nTPROXY_PORT=%q\\n' "$lan_if" "$lan_cidr" "$tproxy_port" > "$CONFIG"
   chmod 600 "$CONFIG"
   install -m 0755 "$0" "$INSTALL_PATH"
   cat > "$UNIT" <<EOF
