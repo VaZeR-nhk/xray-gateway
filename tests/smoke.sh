@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 IMAGE="${1:-xray-gateway:ci}"
-DATA=$(mktemp -d)
+STATE=$(mktemp -d)
+ENVFILE=$(mktemp)
 NAME=xray-gateway-smoke
 OUT=$(mktemp)
 COOKIE=$(mktemp)
 cleanup(){
   docker rm -f "$NAME" >/dev/null 2>&1 || true
-  rm -rf "$DATA" "$OUT" "$COOKIE"
+  rm -rf "$STATE" "$ENVFILE" "$OUT" "$COOKIE"
 }
 trap cleanup EXIT
 
-chmod 700 "$DATA"
-cat > "$DATA/.env" <<'EOF'
+chmod 700 "$STATE"
+cat > "$ENVFILE" <<'EOF'
 SUBSCRIPTION_URL=https://example.invalid/subscription
 USER_AGENT=Happ
 ACTIVE_PROFILE=0
@@ -22,28 +23,28 @@ WEB_USERNAME=ci
 WEB_PASSWORD=ci-password-long
 SESSION_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 EOF
-printf '11111111-1111-4111-8111-111111111111\n' > "$DATA/hwid"
-cat > "$DATA/subscription.json" <<'EOF'
+printf '11111111-1111-4111-8111-111111111111\n' > "$STATE/hwid"
+cat > "$STATE/subscription.json" <<'EOF'
 [{"remarks":"CI smoke profile","inbounds":[],"outbounds":[{"protocol":"freedom","tag":"direct"}],"routing":{"rules":[]}}]
 EOF
-cat > "$DATA/state.json" <<'EOF'
+cat > "$STATE/state.json" <<'EOF'
 {"active_profile":0,"profile_count":1,"status":"success","action":"fixture"}
 EOF
-cat > "$DATA/config.json" <<'EOF'
+cat > "$STATE/config.json" <<'EOF'
 {
   "log":{"loglevel":"warning"},
   "inbounds":[{"listen":"127.0.0.1","port":18081,"protocol":"socks","settings":{"auth":"noauth","udp":false}}],
   "outbounds":[{"protocol":"freedom","tag":"direct"}]
 }
 EOF
-chmod 600 "$DATA"/*
+chmod 600 "$STATE"/*
 
 docker run -d --name "$NAME" --network host \
   --cap-add NET_ADMIN --cap-add NET_RAW --cap-add NET_BIND_SERVICE \
   -e XRAY_WEB_HOST=127.0.0.1 -e XRAY_WEB_PORT=18080 \
   -e WEB_USERNAME=ci -e WEB_PASSWORD=ci-password-long \
   -e SESSION_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
-  -v "$DATA:/etc/xray-gateway" "$IMAGE" >/dev/null
+  -v "$STATE:/var/lib/xray-gateway" -v "$ENVFILE:/etc/xray-gateway/.env" "$IMAGE" >/dev/null
 
 docker exec "$NAME" test -s /usr/local/bin/geosite.dat
 docker exec "$NAME" test -s /usr/local/bin/geoip.dat
