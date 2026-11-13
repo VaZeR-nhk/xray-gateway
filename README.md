@@ -41,7 +41,7 @@ Docker Engine устанавливается штатно. Его системн
 Выполнять под root на Debian 12/13. Одна и та же команда подходит для чистого сервера и для уже установленного проекта:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/VaZeR-nhk/xray-gateway/main/bootstrap.sh)"
+apt-get update && apt-get install -y curl ca-certificates && bash -c "$(curl -fsSL https://raw.githubusercontent.com/VaZeR-nhk/xray-gateway/main/bootstrap.sh)"
 ```
 
 Сценарий клонирует проект, если его ещё нет, либо выполняет безопасное обновление существующего клона через fast-forward. Файлы `.env` и `data` сохраняются. Локальные изменения в Git не сбрасываются: при их обнаружении сценарий остановится. Если `/opt/xray-gateway` существует, но не является Git-клоном этого проекта, сценарий также остановится и ничего не удалит.
