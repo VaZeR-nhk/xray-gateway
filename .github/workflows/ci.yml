@@ -10,9 +10,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Python syntax
-        run: python3 -m py_compile gateway/app.py gateway/node_checks.py gateway/xray-gateway
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for name in ('gateway/app.py', 'gateway/node_checks.py', 'gateway/xray-gateway'):
+              compile(Path(name).read_text(encoding='utf-8'), name, 'exec')
+          PY
       - name: Shell syntax
-        run: bash -n install.sh update.sh uninstall.sh migrate-native.sh host-network.sh tests/smoke.sh docker/entrypoint.sh docker/update-loop.sh
+        run: bash -n bootstrap.sh install.sh update.sh uninstall.sh migrate-native.sh host-network.sh tests/smoke.sh docker/entrypoint.sh docker/update-loop.sh
       - name: Prepare CI environment
         run: cp .env.example .env && chmod 600 .env
       - name: Docker Compose validation
