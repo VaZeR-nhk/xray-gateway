@@ -42,7 +42,7 @@ class TproxyConfigTests(unittest.TestCase):
         result = self.build(port="23456")
         inbound = next(x for x in result["inbounds"] if x["tag"] == "tproxy-in")
         self.assertEqual(inbound["protocol"], "dokodemo-door")
-        self.assertEqual(inbound["listen"], "192.168.12.39")
+        self.assertEqual(inbound["listen"], "0.0.0.0")
         self.assertEqual(inbound["port"], 23456)
         self.assertEqual(inbound["settings"], {"network": "tcp,udp", "followRedirect": True})
         self.assertEqual(inbound["streamSettings"]["sockopt"]["tproxy"], "tproxy")
