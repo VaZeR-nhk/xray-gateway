@@ -46,7 +46,9 @@ class TproxyConfigTests(unittest.TestCase):
         self.assertEqual(inbound["port"], 23456)
         self.assertEqual(inbound["settings"], {"allowedNetwork": "tcp,udp", "followRedirect": True})
         self.assertEqual(inbound["streamSettings"]["sockopt"]["tproxy"], "tproxy")
-        self.assertNotIn("sniffing", inbound)
+        self.assertEqual(inbound["sniffing"], {
+            "enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True
+        })
 
     def test_existing_routing_and_outbounds_are_preserved(self):
         result = self.build()
