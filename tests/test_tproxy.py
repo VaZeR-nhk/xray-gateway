@@ -41,14 +41,12 @@ class TproxyConfigTests(unittest.TestCase):
     def test_enabled_adds_tcp_udp_transparent_inbound(self):
         result = self.build(port="23456")
         inbound = next(x for x in result["inbounds"] if x["tag"] == "tproxy-in")
-        self.assertEqual(inbound["protocol"], "dokodemo-door")
+        self.assertEqual(inbound["protocol"], "tunnel")
         self.assertEqual(inbound["listen"], "0.0.0.0")
         self.assertEqual(inbound["port"], 23456)
-        self.assertEqual(inbound["settings"], {"network": "tcp,udp", "followRedirect": True})
+        self.assertEqual(inbound["settings"], {"allowedNetwork": "tcp,udp", "followRedirect": True})
         self.assertEqual(inbound["streamSettings"]["sockopt"]["tproxy"], "tproxy")
-        self.assertEqual(inbound["sniffing"], {
-            "enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": True
-        })
+        self.assertNotIn("sniffing", inbound)
 
     def test_existing_routing_and_outbounds_are_preserved(self):
         result = self.build()
